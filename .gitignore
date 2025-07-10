@@ -1,7 +1,5 @@
-*.pyc
 *.csv
-/archive
-/cache
-data_pipeline/entity_process/soft_match/api call.ipynb
-/output
-*.pt
+*.json
+
+*_pycache_/*
+*.pyc
