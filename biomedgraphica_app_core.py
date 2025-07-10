@@ -11,6 +11,7 @@ from biomedgraphica_app_constants import (
 )
 from components.entity_row import render_entity_row
 from components.log_console import render_log_console, log_to_console
+from components.knowledge_graph import render_knowledge_graph
 
 import streamlit as st
 
@@ -92,10 +93,16 @@ def build_app():
                 st.rerun()
 
             st.markdown("---")
+
+            # Label file upload
             st.subheader("Label")
             lup = st.file_uploader("Upload Label File", type=["csv", "tsv", "txt"], key="lbl_up", label_visibility="collapsed")
             if lup is not None:
-                st.session_state.label_path = lup.name
+                # Check if the label file has been uploaded before
+                if not st.session_state.get("_label_uploaded_once") or st.session_state.label_path != lup.name:
+                    st.session_state.label_path = lup.name
+                    st.session_state["_label_uploaded_once"] = True
+                    log_to_console(f"📁 Label file uploaded: `{lup.name}`")
 
             # Next button
             btn_l, btn_r = st.columns([1, 1])
@@ -113,9 +120,17 @@ def build_app():
             with l:
                 fo = st.text_input("File order", ", ".join(st.session_state.file_order))
                 st.session_state.file_order = [s.strip() for s in fo.split(',') if s.strip()]
-                new_zscore = st.checkbox("Apply Z-score", value=st.session_state.apply_zscore, key="zscore_check")
-                if new_zscore != st.session_state.apply_zscore:
-                    st.session_state.apply_zscore = new_zscore
+
+                # Z-score normalization checkbox
+                st.checkbox("Apply Z-score", key="zscore_check")
+                z_before = st.session_state.get("_last_zscore_val", None)
+                z_now = st.session_state["zscore_check"]
+                if z_before is not None and z_before != z_now:
+                    status = "enabled" if z_now else "disabled"
+                    log_to_console(f"⚙️ Z-score normalization {status}.")
+                st.session_state["_last_zscore_val"] = z_now
+                st.session_state.apply_zscore = z_now  # store in session state
+
             with r:
                 et = st.text_area("Edge types", "\n".join(st.session_state.edge_types), height=150)
                 st.session_state.edge_types = [s.strip() for s in et.split('\n') if s.strip()]
@@ -130,9 +145,24 @@ def build_app():
                     st.rerun()
             with btn_r:
                 if st.button("▶️ Run processing", key="step2_run", use_container_width=True):
-                    cfgs = [dict(feature_label=e["feature_label"], entity_type=e["entity_type"].lower(), id_type=e["id_type"], file_path=e["file_path"], fill0=e["fill0"]) for e in st.session_state.entities if e["feature_label"].strip()]
+                    cfgs = [
+                        dict(
+                            feature_label=e["feature_label"],
+                            entity_type=e["entity_type"].lower(),
+                            id_type=e["id_type"],
+                            file_path=e["file_path"],
+                            fill0=e["fill0"]
+                        )
+                        for e in st.session_state.entities if e["feature_label"].strip()
+                    ]
                     if st.session_state.label_path:
-                        cfgs.append(dict(feature_label="label", entity_type="label", id_type="", file_path=st.session_state.label_path, fill0=False))
+                        cfgs.append(dict(
+                            feature_label="label",
+                            entity_type="label",
+                            id_type="",
+                            file_path=st.session_state.label_path,
+                            fill0=False
+                        ))
                     final = dict(
                         configs=cfgs,
                         finalize=dict(
@@ -144,56 +174,65 @@ def build_app():
                     st.code(json.dumps(final, indent=2), language="json")
                     try:
                         from backend.processors import process
-                        res = process(*final["configs"], database_path=db, output_dir=od, file_order=final["finalize"].get("file_order"), apply_zscore=final["finalize"].get("apply_zscore", False), edge_types=final["finalize"].get("edge_types"))
+                        res = process(
+                            *final["configs"],
+                            database_path=db,
+                            output_dir=od,
+                            file_order=final["finalize"].get("file_order"),
+                            apply_zscore=final["finalize"].get("apply_zscore", False),
+                            edge_types=final["finalize"].get("edge_types")
+                        )
                         st.success(f"Done: {res['summary']['success']} / {res['summary']['total']}")
+                        log_to_console("✅ Processing completed successfully.")
                     except Exception as exc:
                         st.exception(exc)
+                        log_to_console(f"❌ Error during processing: {exc}")
 
     with main_right:
-        st.markdown("### 🕸️  Graph")
-        st.info("placeholder placeholder placeholder placeholder placeholder placeholder")
+        # Graph
+        render_knowledge_graph()
 
         st.divider()
 
         # Status info box
         render_log_console()
 
-    # ---------- style tweaks ----------
-    st.markdown("""
-    <style>
-    section[data-testid='stFileUploader'] label div span {display:none!important;}
-    button[kind='primary'] {width:100%}
+    # # ---------- style tweaks ----------
+    # st.markdown("""
+    # <style>
+    # section[data-testid='stFileUploader'] label div span {display:none!important;}
+    # button[kind='primary'] {width:100%}
 
-    /* Disable text area resizing */
-    textarea[data-testid="stTextArea"] {
-        resize: none !important;
-    }
+    # /* Disable text area resizing */
+    # textarea[data-testid="stTextArea"] {
+    #     resize: none !important;
+    # }
 
-    /* Add scrollbar style for status info box */
-    div[data-testid="stTextArea"] textarea {
-        resize: none !important;
-        overflow-y: auto !important;
-    }
+    # /* Add scrollbar style for status info box */
+    # div[data-testid="stTextArea"] textarea {
+    #     resize: none !important;
+    #     overflow-y: auto !important;
+    # }
 
-    /* Set default state to red */
-    button[data-testid="baseButton-primary"] {
-        background-color: #ff4b4b !important;
-        border-color: #ff4b4b !important;
-    }
+    # /* Set default state to red */
+    # button[data-testid="baseButton-primary"] {
+    #     background-color: #ff4b4b !important;
+    #     border-color: #ff4b4b !important;
+    # }
 
-    /* Hover state to green */
-    button[data-testid="baseButton-primary"]:hover {
-        background-color: #28a745 !important;
-        border-color: #28a745 !important;
-    }
+    # /* Hover state to green */
+    # button[data-testid="baseButton-primary"]:hover {
+    #     background-color: #28a745 !important;
+    #     border-color: #28a745 !important;
+    # }
 
-    /* Remove extra styles for focus and active states */
-    button[data-testid="baseButton-primary"]:focus,
-    button[data-testid="baseButton-primary"]:active,
-    button[data-testid="baseButton-primary"]:focus:not(:focus-visible) {
-        outline: none !important;
-        box-shadow: none !important;
-        transform: none !important;
-    }
+    # /* Remove extra styles for focus and active states */
+    # button[data-testid="baseButton-primary"]:focus,
+    # button[data-testid="baseButton-primary"]:active,
+    # button[data-testid="baseButton-primary"]:focus:not(:focus-visible) {
+    #     outline: none !important;
+    #     box-shadow: none !important;
+    #     transform: none !important;
+    # }
 
-    </style>""", unsafe_allow_html=True)
+    # </style>""", unsafe_allow_html=True)

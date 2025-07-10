@@ -9,7 +9,7 @@ def match_entity_type(filename: str) -> str | None:
 
     name_lower = filename.lower()
 
-    # 1. 关键词优先匹配（可以自定义映射扩展）
+    # 1. keyword-based matching
     keyword_map = {
         "promoter": "Promoter",
         "gene": "Gene",
@@ -28,7 +28,7 @@ def match_entity_type(filename: str) -> str | None:
         if keyword in name_lower:
             return entity
 
-    # 2. fallback: 如果包含实体名直接返回
+    # 2. fallback: if entity name is included, return it directly
     for entity in ENTITY_TYPES:
         if entity.lower() in name_lower:
             return entity
@@ -88,10 +88,18 @@ def render_entity_row(ent: dict) -> bool:
         else:
             upf = st.file_uploader("Upload", type=["csv", "tsv", "txt"], key=f"upl_{ent['uuid']}", label_visibility="collapsed")
             if upf is not None:
+                # Check if the file has been uploaded before
+                if ent.get("_uploaded_once") and ent.get("file_path") == upf.name:
+                    return remove  # exit early if already uploaded
+
                 ent["file_path"] = upf.name
+                ent["_uploaded_once"] = True  # Set uploaded flag
+
+                log_to_console(f"📁 File uploaded: `{upf.name}`")
+
                 updated = False
 
-                # --------- Label auto-fill ---------
+                # Label auto-fill
                 if not ent["feature_label"].strip() and not ent.get("auto_fill_label"):
                     filename_base = os.path.splitext(upf.name)[0]
                     ent["feature_label"] = filename_base
@@ -99,11 +107,11 @@ def render_entity_row(ent: dict) -> bool:
                     log_to_console(f"✅ Auto-filled label from file: `{filename_base}`")
                     updated = True
                 elif ent.get("auto_fill_label"):
-                    pass  # already filled once via auto
+                    pass
                 else:
                     log_to_console("⚠️ Label already filled. Skipped auto-fill.")
 
-                # --------- Entity Type auto-detect ---------
+                # Entity type auto-detect
                 if not ent["entity_type"] and not ent.get("auto_fill_type"):
                     matched = match_entity_type(upf.name)
                     if matched:
@@ -114,7 +122,7 @@ def render_entity_row(ent: dict) -> bool:
                     else:
                         log_to_console("⚠️ No matching entity type found in filename.")
                 elif ent.get("auto_fill_type"):
-                    pass  # already filled once
+                    pass
                 else:
                     log_to_console("⚠️ Entity type already selected. Skipped auto-detect.")
 
