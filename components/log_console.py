@@ -15,7 +15,7 @@ def render_log_console():
     logs = st.session_state.get("log_messages", [])
 
     # Fixed height container for logs
-    with st.container(height=300):
+    with st.container(height=400):
         st.markdown("""
         <style>
         .stChatMessage {

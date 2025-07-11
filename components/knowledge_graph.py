@@ -5,31 +5,33 @@ import networkx as nx
 from pyvis.network import Network
 import streamlit.components.v1 as components
 
+selected_color = "#3f704d"  # Color for selected nodes and edges
+
 # Define entity types and their colors
 ENTITY_TYPES_COLORS = {
-    "Promoter": "black",
-    "Gene": "#f4cccc",
-    "Transcript": "#a2c4c9",
-    "Protein": "#fce5cd",
-    "Pathway": "#d9ead3",
-    "Exposure": "#ead1dc",
+    "Promoter": "#ed7d31",
+    "Gene": "#f59393",
+    "Transcript": "#64cbf0",
+    "Protein": "#ffcd33",
+    "Pathway": "#91cf50",
+    "Exposure": "#836599",
     "Metabolite": "#f9cb9c",
-    "Drug": "#b6b6b6",
-    "Microbiota": "#f6b26b",
-    "Phenotype": "#cfe2f3",
-    "Disease": "#f4cccc"
+    "Drug": "#b5b5b5",
+    "Microbiota": "#87a771",
+    "Phenotype": "#62a3d1",
+    "Disease": "#b58a6d"
 }
 
 # Fixed node positions
 NODE_POSITIONS = {
-    "Promoter": (-300, 0),
+    "Promoter": (-330, -20),
     "Gene": (-200, -50),
     "Transcript": (-100, 0),
     "Protein": (-50, 100),
-    "Pathway": (0, -30),
-    "Exposure": (80, -150),
-    "Metabolite": (120, 150),
-    "Drug": (200, -100),
+    "Pathway": (-20, -30),
+    "Exposure": (50, -170),
+    "Metabolite": (80, 150),
+    "Drug": (200, -120),
     "Microbiota": (250, 200),
     "Phenotype": (300, -50),
     "Disease": (350, 80),
@@ -90,46 +92,50 @@ EDGES = [
 def render_knowledge_graph():
     st.subheader("🧠 Knowledge Graph")
 
-    # 读取选中的实体类型（从 session_state.entities）
+    # Retrieve selected entity types (from session_state.entities)
     selected_entities = []
     if "entities" in st.session_state:
         selected_entities = [
             ent["entity_type"] for ent in st.session_state.entities if ent["entity_type"]
         ]
 
-    # 构建图
+    # Create a directed graph
     G = nx.DiGraph()
     G.add_edges_from(EDGES)
 
-    # 构建 Pyvis 图
+    # Create a Pyvis network
     net = Network(height="500px", width="100%", directed=True)
-    net.barnes_hut()  # 使用更平滑的力导引引擎（物理布局被禁用）
+    net.barnes_hut()  # Use a smoother force-directed engine (physics layout is disabled)
 
-    # 添加节点
+    # Add nodes with fixed positions
     for node in G.nodes():
-        base_color = ENTITY_TYPES_COLORS.get(node, "gray")
-        is_selected = node in selected_entities
-        border_color = "#FFD700" if is_selected else "#333"
-        border_width = 6 if is_selected else 1
+      is_selected = node in selected_entities
 
-        net.add_node(
-            node,
-            label=node,
-            color=base_color,
-            borderWidth=border_width,
-            borderWidthSelected=border_width,
-            x=NODE_POSITIONS[node][0],
-            y=NODE_POSITIONS[node][1],
-            fixed={"x": True, "y": True},
-        )
+      net.add_node(
+          node,
+          label=node,
+          color={
+              "background": ENTITY_TYPES_COLORS.get(node, "gray"),
+              "border": selected_color if is_selected else "#333",
+              "highlight": {
+                  "background": ENTITY_TYPES_COLORS.get(node, "gray"),
+                  "border": selected_color
+              }
+          },
+          borderWidth=3 if is_selected else 1,
+          borderWidthSelected=3,
+          x=NODE_POSITIONS[node][0],
+          y=NODE_POSITIONS[node][1],
+          fixed={"x": True, "y": True}
+      )
 
-    # 添加边
+    # Add edges with highlighting
     for src, dst in G.edges():
         highlight = src in selected_entities and dst in selected_entities
         net.add_edge(
             src,
             dst,
-            color="#FFD700" if highlight else "#888",
+            color=selected_color if highlight else "#888",
             width=3 if highlight else 1,
             arrowStrikethrough=False
         )
@@ -162,4 +168,38 @@ def render_knowledge_graph():
     net.save_graph("temp_graph.html")
     with open("temp_graph.html", "r", encoding="utf-8") as f:
         html_content = f.read()
-        components.html(html_content, height=550, scrolling=True)
+
+    # Inject the drawing code before the </script> that closes Vis.js config
+    injected_code = """
+    network.on("afterDrawing", function (ctx) {
+      // First ellipse
+      ctx.beginPath();
+      ctx.ellipse(-240, 0, 140, 90, 0, 0, 2 * Math.PI);
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+
+      // Second ellipse
+      ctx.beginPath();
+      ctx.ellipse(-140, 50, 260, 200, 0, 0, 2 * Math.PI);
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.stroke();
+
+      // Reset line dash
+      ctx.setLineDash([]);
+
+      // Draw labels
+      ctx.font = "bold 20px Arial";
+      ctx.fillStyle = "black";
+      ctx.fillText("Nucleus", -270, 60);
+      ctx.fillText("Cell", -150, 220);
+    });
+    """
+
+    # Insert before last </script>
+    html_content = html_content.replace("</script>", injected_code + "\n</script>")
+
+    components.html(html_content, height=550, scrolling=True)
