@@ -4,100 +4,30 @@ import streamlit as st
 import networkx as nx
 from pyvis.network import Network
 import streamlit.components.v1 as components
+from biomedgraphica_app_constants import ENTITY_TYPES_COLORS, NODE_POSITIONS, EDGES
+from utils.temp_manager import get_temp_manager
+import os
 
-selected_color = "#3f704d"  # Color for selected nodes and edges
-
-# Define entity types and their colors
-ENTITY_TYPES_COLORS = {
-    "Promoter": "#ed7d31",
-    "Gene": "#f59393",
-    "Transcript": "#64cbf0",
-    "Protein": "#ffcd33",
-    "Pathway": "#91cf50",
-    "Exposure": "#836599",
-    "Metabolite": "#f9cb9c",
-    "Drug": "#b5b5b5",
-    "Microbiota": "#87a771",
-    "Phenotype": "#62a3d1",
-    "Disease": "#b58a6d"
-}
-
-# Fixed node positions
-NODE_POSITIONS = {
-    "Promoter": (-330, -20),
-    "Gene": (-200, -50),
-    "Transcript": (-100, 0),
-    "Protein": (-50, 100),
-    "Pathway": (-20, -30),
-    "Exposure": (50, -170),
-    "Metabolite": (80, 150),
-    "Drug": (200, -120),
-    "Microbiota": (250, 200),
-    "Phenotype": (300, -50),
-    "Disease": (350, 80),
-
-
-}
-
-# Define relationships (directed edges)
-EDGES = [
-    # Core relationships
-    ("Promoter", "Gene"),
-    ("Gene", "Transcript"),
-    ("Transcript", "Protein"),
-
-    # Protein relationships (4)
-    ("Protein", "Protein"),
-    ("Protein", "Pathway"),
-    ("Protein", "Disease"),
-    ("Protein", "Phenotype"),
-
-    # Pathway relationships (2)
-    ("Pathway", "Drug"),
-    ("Pathway", "Protein"),
-
-    # Exposure relationships (3)
-    ("Exposure", "Gene"),
-    ("Exposure", "Pathway"),
-    ("Exposure", "Disease"),
-
-    # Microbiota relationships (3)
-    ("Metabolite", "Metabolite"),
-    ("Metabolite", "Protein"),
-    ("Metabolite", "Disease"),
-
-    # Drug relationships (7)
-    ("Drug", "Drug"),
-    ("Drug", "Pathway"),
-    ("Drug", "Protein"),
-    ("Drug", "Metabolite"),
-    ("Drug", "Microbiota"),
-    ("Drug", "Disease"),
-    ("Drug", "Phenotype"),
-
-    # Microbiota relationships (1)
-    ("Microbiota", "Disease"),
-
-    # Disease relationships (2)
-    ("Disease", "Disease"),
-    ("Disease", "Phenotype"),
-
-    # Phenotype relationships (2)
-    ("Phenotype", "Phenotype"),
-    ("Phenotype", "Disease"),
-
-]
-
+selected_color = "black"  # Color for selected nodes and edges
+error_color = "#ff0000"  # Color for errors (missing nodes, broken paths)
 
 def render_knowledge_graph():
     st.subheader("🧠 Knowledge Graph")
-
+    
     # Retrieve selected entity types (from session_state.entities)
     selected_entities = []
     if "entities" in st.session_state:
         selected_entities = [
             ent["entity_type"] for ent in st.session_state.entities if ent["entity_type"]
         ]
+    
+    # Analyze connectivity of the knowledge graph
+    from .entity_row import analyze_knowledge_graph_connectivity
+    connectivity_analysis = analyze_knowledge_graph_connectivity(st.session_state.get("entities", []))
+    
+    missing_nodes = connectivity_analysis.get("missing_nodes", [])
+    broken_paths = connectivity_analysis.get("broken_paths", [])
+    path_edges = connectivity_analysis.get("path_edges", [])
 
     # Create a directed graph
     G = nx.DiGraph()
@@ -109,34 +39,87 @@ def render_knowledge_graph():
 
     # Add nodes with fixed positions
     for node in G.nodes():
-      is_selected = node in selected_entities
+        is_selected = node in selected_entities
+        is_missing = node in missing_nodes
+        
+        # Determine node color and border based on state
+        if is_missing:
+            node_color = "#ffcccc"  # red background for missing nodes
+            border_color = error_color  # red border
+            border_width = 2
+        elif is_selected:
+            node_color = ENTITY_TYPES_COLORS.get(node, "gray")
+            border_color = selected_color
+            border_width = 3
+        else:
+            node_color = ENTITY_TYPES_COLORS.get(node, "gray")
+            border_color = "#333"
+            border_width = 1
 
-      net.add_node(
-          node,
-          label=node,
-          color={
-              "background": ENTITY_TYPES_COLORS.get(node, "gray"),
-              "border": selected_color if is_selected else "#333",
-              "highlight": {
-                  "background": ENTITY_TYPES_COLORS.get(node, "gray"),
-                  "border": selected_color
-              }
-          },
-          borderWidth=3 if is_selected else 1,
-          borderWidthSelected=3,
-          x=NODE_POSITIONS[node][0],
-          y=NODE_POSITIONS[node][1],
-          fixed={"x": True, "y": True}
-      )
+        net.add_node(
+            node,
+            label=node,
+            color={
+                "background": node_color,
+                "border": border_color,
+                "highlight": {
+                    "background": node_color,
+                    "border": border_color
+                }
+            },
+            borderWidth=border_width,
+            borderWidthSelected=border_width,
+            x=NODE_POSITIONS[node][0],
+            y=NODE_POSITIONS[node][1],
+            fixed={"x": True, "y": True}
+        )
 
     # Add edges with highlighting
     for src, dst in G.edges():
-        highlight = src in selected_entities and dst in selected_entities
+        # Check if this edge is part of a broken path
+        is_broken_edge = False
+        for broken_src, broken_dst in broken_paths:
+            if (src == broken_src and dst == broken_dst) or (src == broken_dst and dst == broken_src):
+                is_broken_edge = True
+                break
+        
+        # Check if this edge is part of the connectivity path
+        is_path_edge = (src, dst) in path_edges or (dst, src) in path_edges
+        
+        # Check if this edge connects selected nodes directly
+        connects_selected = src in selected_entities and dst in selected_entities
+        
+        # Color logic:
+        # - Red: only for path edges that involve missing nodes or broken paths
+        # - Black: edges that connect selected nodes directly
+        # - Gray: normal edges
+        if is_broken_edge:
+            edge_color = error_color  # red for broken edges
+            edge_width = 2
+        elif is_path_edge and missing_nodes:
+            # Only color red if it's a path edge AND there are missing nodes
+            edge_involves_missing = src in missing_nodes or dst in missing_nodes
+            if edge_involves_missing:
+                edge_color = error_color  # red for path edges involving missing nodes
+                edge_width = 2
+            elif connects_selected:
+                edge_color = selected_color  # black for selected connections
+                edge_width = 3
+            else:
+                edge_color = "#888"  # gray for normal edges
+                edge_width = 1
+        elif connects_selected:
+            edge_color = selected_color  # black for selected connections
+            edge_width = 3
+        else:
+            edge_color = "#888"  # gray for normal edges
+            edge_width = 1
+            
         net.add_edge(
             src,
             dst,
-            color=selected_color if highlight else "#888",
-            width=3 if highlight else 1,
+            color=edge_color,
+            width=edge_width,
             arrowStrikethrough=False
         )
 
@@ -166,8 +149,24 @@ def render_knowledge_graph():
     """)
 
     net.save_graph("temp_graph.html")
-    with open("temp_graph.html", "r", encoding="utf-8") as f:
-        html_content = f.read()
+    
+    # Move the graph to the session's temp directory
+    temp_manager = get_temp_manager()
+    if "job_id" in st.session_state:
+        job_dir = temp_manager.get_session_job_dir(create_if_not_exists=True)
+        temp_graph_path = job_dir / "temp_graph.html"
+        
+        # Move the file to temp directory
+        import shutil
+        shutil.move("temp_graph.html", str(temp_graph_path))
+        
+        # Read from temp directory
+        with open(temp_graph_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+    else:
+        # Fallback: read from current directory if no session
+        with open("temp_graph.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
 
     # Inject the drawing code before the </script> that closes Vis.js config
     injected_code = """
@@ -203,3 +202,33 @@ def render_knowledge_graph():
     html_content = html_content.replace("</script>", injected_code + "\n</script>")
 
     components.html(html_content, height=550, scrolling=True)
+    
+    # Display legend and status information
+    if missing_nodes or broken_paths:
+        st.markdown("**🔍 Graph Analysis:**")
+        if missing_nodes:
+            st.markdown(f"🔴 **Missing nodes for connectivity:** {', '.join(missing_nodes)}")
+            
+            # Quick add missing nodes button
+            if st.button("🔧 Quick add missing nodes", key="quick_add_missing"):
+                import uuid
+                for missing_node in missing_nodes:
+                    st.session_state.entities.append(dict(
+                        uuid=str(uuid.uuid4()),
+                        fill0=True,  # Virtual node
+                        feature_label=missing_node.lower(),  # Use lowercase label
+                        entity_type=missing_node,
+                        id_type="",
+                        file_path=""
+                    ))
+                from .entity_row import log_to_console
+                log_to_console(f"🔧 Quick-added missing virtual nodes: {', '.join(missing_nodes)}")
+                st.rerun()
+                
+        if broken_paths:
+            st.markdown("🔴 **Disconnected paths:**")
+            for src, dst in broken_paths:
+                st.markdown(f"  • {src} ↔ {dst}")
+    else:
+        if selected_entities:
+            st.markdown("✅ **All selected entities are connected**")

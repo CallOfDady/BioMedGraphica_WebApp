@@ -3,3 +3,7 @@
 
 *_pycache_/*
 *.pyc
+
+*cache/*
+
+*manage_temp.py
