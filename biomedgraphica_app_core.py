@@ -7,7 +7,8 @@ import json, uuid, os
 from typing import Dict, List
 
 from biomedgraphica_app_constants import (
-    ENTITY_TYPES, ID_TYPES, DEFAULT_ENTITY_ORDER
+    ENTITY_TYPES, ID_TYPES, DEFAULT_ENTITY_ORDER,
+    get_display_ids_for_entity, get_id_info_from_display
 )
 from components.entity_row import render_entity_row, validate_entities, check_label_file, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
 from components.log_console import render_log_console, log_to_console
@@ -17,6 +18,7 @@ from utils.temp_manager import get_temp_manager
 from utils.app_init import initialize_app
 
 import streamlit as st
+import streamlit_nested_layout
 from streamlit_sortables import sort_items
 
 
@@ -59,22 +61,6 @@ def log_to_console(message: str):
 
 def build_app():
 
-    # ---------- App Initialization ----------
-    initialize_app()
-
-    # ---------- Session init ----------
-    if "entities" not in st.session_state:
-        st.session_state.entities = [dict(uuid=str(uuid.uuid4()), fill0=False, feature_label="", entity_type="", id_type=ID_TYPES[""][0], file_path="") for _ in range(2)]
-    st.session_state.setdefault("label_path", "")
-    st.session_state.setdefault("file_order", [])
-    st.session_state.setdefault("edge_types", [])
-    st.session_state.setdefault("selected_edge_types", [])
-    st.session_state.setdefault("apply_zscore", False)
-    st.session_state.setdefault("step1_open", True)
-    st.session_state.setdefault("step2_open", False)
-
-    st.session_state.setdefault("log_messages", ["📟 Processing console initialized."])
-
     # ---------- UI ----------
     st.set_page_config(f"BiomedGraphica Integration", layout="wide")
     st.title("🧬 BiomedGraphica – Data Integration")
@@ -88,6 +74,22 @@ def build_app():
     - Construct **custom knowledge-signaling graphs**
     - Export **graph-ready `.npy` files** for downstream modeling
     """)
+    # ---------- App Initialization ----------
+    # Init temp manager, directories, and matcher
+    initialize_app()
+
+    # ---------- Session init ----------
+    if "entities" not in st.session_state:
+        st.session_state.entities = [dict(uuid=str(uuid.uuid4()), fill0=False, feature_label="", entity_type="", id_type=get_display_ids_for_entity("")[0], file_path="") for _ in range(2)]
+    st.session_state.setdefault("label_path", "")
+    st.session_state.setdefault("file_order", [])
+    st.session_state.setdefault("edge_types", [])
+    st.session_state.setdefault("selected_edge_types", [])
+    st.session_state.setdefault("apply_zscore", False)
+    st.session_state.setdefault("step1_open", True)
+    st.session_state.setdefault("step2_open", False)
+
+    st.session_state.setdefault("log_messages", ["📟 Processing console initialized."])
 
     # ---------- Job Status Panel ----------
     temp_manager = get_temp_manager()
@@ -115,6 +117,13 @@ def build_app():
             for i in sorted(remove_indices, reverse=True):
                 del st.session_state.entities[i]
             if remove_indices:
+                # Update file order to reflect entity removal
+                current_entities = [ent["feature_label"] for ent in st.session_state.entities]
+                current_file_order = st.session_state.get("file_order", [])
+                # Keep only entities that still exist
+                updated_file_order = [label for label in current_file_order if label in current_entities]
+                st.session_state.file_order = updated_file_order
+                log_to_console(f"📋 Entity order updated after removal: {' → '.join(updated_file_order)}")
                 st.rerun()
 
             # Add entity buttons
@@ -127,9 +136,10 @@ def build_app():
                         fill0=False,
                         feature_label="",
                         entity_type="",
-                        id_type=ID_TYPES[""][0],
+                        id_type=get_display_ids_for_entity("")[0],
                         file_path=""
                     ))
+                    log_to_console("📋 Added new entity row")
                     st.rerun()
             
             with btn_col2:
@@ -265,11 +275,7 @@ def build_app():
                     
                     # if entity_validation["valid"] and label_validation["valid"]:
                     if entity_validation["valid"] and label_validation["valid"]:
-                        # generate edge types
-                        generated_edge_types = generate_edge_types_from_entities(st.session_state.entities)
-                        st.session_state.edge_types = generated_edge_types
-                        st.session_state.selected_edge_types = generated_edge_types.copy()  # Default select all
-                        
+                        # Generate file order (edge types are generated dynamically in Step 2)
                         st.session_state.file_order = _build_file_order(st.session_state.entities)
                         st.session_state.step1_open, st.session_state.step2_open = False, True
                         log_to_console("✅ Validation passed. Proceeding to Step 2.")
@@ -279,20 +285,44 @@ def build_app():
         with st.expander("Step 2 – Finalise & Run", expanded=st.session_state.step2_open):
             l, r = st.columns(2)
             with l:
-                st.subheader("Entity Order")
-                
+                st.markdown("#### Entity Order")
+                st.markdown(
+                    "<span style='font-size:14px;'>Drag to reorder entities.</span>",
+                    unsafe_allow_html=True
+                )
+
                 # Get current file order from session state
                 current_file_order = st.session_state.get("file_order", [])
                 
+                # Get current entities to ensure file_order is in sync
+                current_entities = [ent["feature_label"] for ent in st.session_state.entities if ent.get("feature_label", "").strip()]
+                
+                # Update file_order if entities have changed
+                if set(current_file_order) != set(current_entities):
+                    # Keep existing order where possible, append new ones
+                    updated_order = [label for label in current_file_order if label in current_entities]
+                    new_entities = [label for label in current_entities if label not in updated_order]
+                    updated_order.extend(new_entities)
+                    st.session_state.file_order = updated_order
+                    current_file_order = updated_order
+                    # log_to_console(f"Entity order synced: {' → '.join(updated_order)}")
+
                 if current_file_order:
+                    # Use dynamic key based on entity count and names to force refresh when entities change
+                    entity_hash = hash(tuple(sorted(current_file_order)))
+                    sortable_key = f"entity_order_sortable_{entity_hash}"
+                    
                     # Use streamlit-sortables for manual reordering
-                    # Create a unique key that includes the order content to force refresh
-                    sortable_key = f"entity_order_sortable_{len(current_file_order)}_{hash(tuple(current_file_order))}"
-                    st.write("Drag to reorder entities (left to right order):")
                     sorted_items = sort_items(current_file_order, key=sortable_key)
                     
-                    # Update session state with new order
-                    st.session_state.file_order = sorted_items
+                    # Check if the order has changed and update immediately
+                    if sorted_items != current_file_order:
+                        st.session_state.file_order = sorted_items
+                        log_to_console(f"📋 Entity order updated: {' → '.join(sorted_items)}")
+                        st.rerun()
+                    
+                    # Display current order
+                    st.caption(f"Current order:\n{' → '.join(current_file_order)}")
                 else:
                     st.info("Entity order will be generated automatically when you proceed from Step 1.")
 
@@ -307,24 +337,45 @@ def build_app():
                 st.session_state.apply_zscore = z_now  # store in session state
 
             with r:
-                st.subheader("Edge Types")
+                st.markdown("#### Edge Types")
                 
-                # Get available edge types from session state
-                available_edge_types = st.session_state.get("edge_types", [])
+                # Generate edge types dynamically based on current entities
+                current_edge_types = generate_edge_types_from_entities(st.session_state.entities)
+                
+                # Update session state if edge types have changed
+                if current_edge_types != st.session_state.get("edge_types", []):
+                    st.session_state.edge_types = current_edge_types
+                    # Update selected edge types to include new ones by default
+                    current_selected = st.session_state.get("selected_edge_types", [])
+                    # Keep existing selections that are still valid, add new ones
+                    updated_selected = [et for et in current_selected if et in current_edge_types]
+                    new_edge_types = [et for et in current_edge_types if et not in updated_selected]
+                    updated_selected.extend(new_edge_types)
+                    st.session_state.selected_edge_types = updated_selected
+                    
+                    # Get current entity types for logging
+                    current_entities = [ent.get("entity_type", "") for ent in st.session_state.entities if ent.get("entity_type", "").strip()]
+                    # log_to_console(f" Edge types updated based on entities {current_entities}: {', '.join(current_edge_types)}")
+                
+                available_edge_types = current_edge_types
                 
                 if available_edge_types:
                     # Get current selection from session state
-                    if "edge_multiselect" in st.session_state:
-                        current_selection = st.session_state["edge_multiselect"]
-                    else:
-                        current_selection = st.session_state.get("selected_edge_types", available_edge_types)
+                    current_selection = st.session_state.get("selected_edge_types", available_edge_types)
+                    
+                    # Ensure current_selection only contains valid options
+                    valid_selection = [et for et in current_selection if et in available_edge_types]
+                    
+                    # Create a dynamic key for multiselect to force refresh when options change
+                    edge_types_hash = hash(tuple(sorted(available_edge_types)))
+                    multiselect_key = f"edge_multiselect_{edge_types_hash}"
                     
                     # Multiselect for edge types
                     selected_edges = st.multiselect(
-                        "Choose edge types:",
+                        label="Choose edge types:",
                         options=available_edge_types,
-                        default=current_selection,
-                        key="edge_multiselect"
+                        default=valid_selection,
+                        key=multiselect_key
                     )
 
                     # Select All / Select None buttons
@@ -333,24 +384,61 @@ def build_app():
                         if st.button("Select All", key="select_all_edges", use_container_width=True):
                             st.session_state.selected_edge_types = available_edge_types.copy()
                             # Remove multiselect's session state to force reload
-                            if "edge_multiselect" in st.session_state:
-                                del st.session_state["edge_multiselect"]
+                            for key in list(st.session_state.keys()):
+                                if key.startswith("edge_multiselect_"):
+                                    del st.session_state[key]
                             st.rerun()
                     with col2:
                         if st.button("Select None", key="select_none_edges", use_container_width=True):
                             st.session_state.selected_edge_types = []
                             # Remove multiselect's session state to force reload
-                            if "edge_multiselect" in st.session_state:
-                                del st.session_state["edge_multiselect"]
+                            for key in list(st.session_state.keys()):
+                                if key.startswith("edge_multiselect_"):
+                                    del st.session_state[key]
                             st.rerun()
                     
                     # Update session state
                     st.session_state.selected_edge_types = selected_edges
                 else:
-                    st.info("Edge types will be generated automatically when you proceed from Step 1.")
+                    st.info("Edge types will be generated automatically based on your selected entities.")
                     
             db = st.text_input("DB path", "E:/LabWork/BioMedGraphica-Conn")
             od = st.text_input("Output dir", "cache")
+
+            # Add collapsible mapping selector above Run button
+            from components.mapping_selector import render_collapsible_mapping_ui
+            has_pending_mappings = render_collapsible_mapping_ui()
+            
+            # Debug: Check mapping sessions
+            print(f"🔍 Mapping sessions debug:")
+            mapping_sessions = [key for key in st.session_state.keys() if key.startswith("mapping_session_")]
+            print(f"  - Found mapping session keys: {mapping_sessions}")
+            for key in mapping_sessions:
+                if not key.endswith("_results"):
+                    session_data = st.session_state[key]
+                    print(f"  - {key}: completed={session_data.get('completed', False)}")
+            
+            # Show processing status if needed
+            if has_pending_mappings:
+                st.info("⏳ ID mappings are required before processing can continue.")
+            
+            # Check if mappings were just confirmed and auto-continue processing
+            just_confirmed_mappings = st.session_state.get("_just_confirmed_mappings", False)
+            if just_confirmed_mappings:
+                # Clear the flag to prevent infinite loop
+                st.session_state["_just_confirmed_mappings"] = False
+                
+                # If we still have pending mappings, something went wrong, don't auto-process
+                if has_pending_mappings:
+                    auto_continue_processing = False
+                    print(f"Warning: Mappings confirmed but still have pending mappings")
+                else:
+                    # Auto-trigger processing
+                    st.info("🔄 Mappings confirmed, continuing processing...")
+                    auto_continue_processing = True
+                    print(f"Auto-continuing processing after mapping confirmation")
+            else:
+                auto_continue_processing = False
 
             # Back and Run buttons
             btn_l, btn_r = st.columns([1, 1])
@@ -359,17 +447,39 @@ def build_app():
                     st.session_state.step1_open, st.session_state.step2_open = True, False
                     st.rerun()
             with btn_r:
-                if st.button("▶️ Run processing", key="step2_run", use_container_width=True):
-                    cfgs = [
-                        dict(
-                            feature_label=e["feature_label"],
-                            entity_type=e["entity_type"].lower(),
-                            id_type=e["id_type"],
-                            file_path=e["file_path"],
-                            fill0=e["fill0"]
-                        )
-                        for e in st.session_state.entities if e["feature_label"].strip()
-                    ]
+                
+                run_button_clicked = st.button("▶️ Run processing", key="step2_run", use_container_width=True)
+                
+                # Process if button clicked or auto-continue after mapping confirmation
+                if run_button_clicked or auto_continue_processing:
+                    if has_pending_mappings:
+                        st.warning("⚠️ Please complete all ID mappings before running processing.")
+                        return
+
+                    # Build configurations with actual IDs and match modes
+                    cfgs = []
+                    for e in st.session_state.entities:
+                        if e["feature_label"].strip():
+                            # Get actual ID and match mode from display ID
+                            id_info = get_id_info_from_display(e["entity_type"], e["id_type"])
+                            
+                            # Debug: Print configuration for phenotype
+                            if e["entity_type"].lower() == "phenotype":
+                                print(f" Building phenotype config:")
+                                print(f" - entity_type: {e['entity_type']}")
+                                print(f" - id_type (display): {e['id_type']}")
+                                print(f" - id_info: {id_info}")
+                                print(f" - feature_label: {e['feature_label']}")
+                                print(f" - file_path: {e['file_path']}")
+                            
+                            cfgs.append(dict(
+                                feature_label=e["feature_label"],
+                                entity_type=e["entity_type"].lower(),
+                                id_type=id_info["actual_id"],
+                                match_mode=id_info["match_mode"],
+                                file_path=e["file_path"],
+                                fill0=e["fill0"]
+                            ))
                     if st.session_state.label_path:
                         cfgs.append(dict(
                             feature_label="label",
@@ -386,8 +496,26 @@ def build_app():
                             edge_types=st.session_state.selected_edge_types,
                         )
                     )
-                    st.code(json.dumps(final, indent=2), language="json")
+                    
+                    # # Log config to console
+                    # if not has_pending_mappings:
+                    #     log_to_console("⚙️ Processing configuration:")
+                    #     config_lines = json.dumps(final, indent=2).split('\n')
+                    #     for line in config_lines:
+                    #         log_to_console(f"   {line}")
+                    #     log_to_console("🚀 Starting processing...")
+                    
+                    # # Debug: Check mapping sessions before processing
+                    # print(f"Pre-processing mapping session check:")
+                    # for key in st.session_state.keys():
+                    #     if key.startswith("mapping_session_") and not key.endswith("_results"):
+                    #         session_data = st.session_state[key]
+                    #         print(f" - {key}: completed={session_data.get('completed', False)}")
+                    
                     try:
+                        # Log processing start
+                        # log_to_console("🔄 Processing entities started...")
+                        
                         from backend.processors import process
                         res = process(
                             *final["configs"],
@@ -397,11 +525,47 @@ def build_app():
                             apply_zscore=final["finalize"].get("apply_zscore", False),
                             edge_types=final["finalize"].get("edge_types")
                         )
-                        st.success(f"Done: {res['summary']['success']} / {res['summary']['total']}")
-                        log_to_console("✅ Processing completed successfully.")
+                        
+                        # Check if processing is waiting for user interaction
+                        if res.get("status") == "pending_user_interaction":
+                            st.info("⏳ Processing paused - please complete the ID mappings above and try again.")
+                            log_to_console("⏳ Processing paused - ID mappings required")
+                            log_to_console(f"⏳ {res.get('message', 'Processing paused for user interaction.')}")
+
+                            st.rerun()
+                        else:
+                            # Normal completion - log to console
+                            log_to_console("✅ Processing completed successfully!")
+                            log_to_console(f"📊 Results: {res['summary']['success']} / {res['summary']['total']} completed")
+                            
+                            # Clear any completed mapping sessions after successful processing
+                            keys_to_remove = []
+                            for key in st.session_state.keys():
+                                if key.startswith("mapping_session_") and not key.endswith("_results"):
+                                    if st.session_state[key].get("completed", False):
+                                        keys_to_remove.append(key)
+                                        # Also remove associated results key
+                                        results_key = f"{key}_results"
+                                        if results_key in st.session_state:
+                                            keys_to_remove.append(results_key)
+                            
+                            for key in keys_to_remove:
+                                del st.session_state[key]
+                            
+                            # Clear the auto-continue flag
+                            if "_just_confirmed_mappings" in st.session_state:
+                                del st.session_state["_just_confirmed_mappings"]
+                            
+                            
+                            # Force rerun to update UI state
+                            st.rerun()
+                            
                     except Exception as exc:
                         st.exception(exc)
                         log_to_console(f"❌ Error during processing: {exc}")
+                        
+                        # Force rerun to update UI state
+                        st.rerun()
 
     with main_right:
         # Graph

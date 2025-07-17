@@ -3,7 +3,7 @@
 import streamlit as st
 import os
 import streamlit_nested_layout
-from biomedgraphica_app_constants import ENTITY_TYPES, ID_TYPES
+from biomedgraphica_app_constants import ENTITY_TYPES, ID_TYPES, get_display_ids_for_entity, get_id_info_from_display
 from .knowledge_graph import ENTITY_TYPES_COLORS
 from utils.temp_manager import get_temp_manager
 
@@ -205,17 +205,18 @@ def render_entity_row(ent: dict) -> bool:
                 else:
                     current_entity_type = session_entity_type if session_entity_type is not None else entity_dict_type
                 
-                opts = ID_TYPES.get(current_entity_type, [""])
+                # Get display IDs for the current entity type
+                display_opts = get_display_ids_for_entity(current_entity_type)
                 
                 # If entity type changed, reset ID type to first option
                 current_id_type = ent.get("id_type", "")
-                if current_id_type not in opts:
-                    ent["id_type"] = opts[0] if opts else ""
+                if current_id_type not in display_opts:
+                    ent["id_type"] = display_opts[0] if display_opts else ""
                 
-                # Use the enhanced bind_selectbox for ID Type as well
-                bind_selectbox(
+                # Use the enhanced bind_selectbox for ID Type with display IDs
+                selected_display_id = bind_selectbox(
                     label="ID Type",
-                    options=opts,
+                    options=display_opts,
                     key=f"idt_{uuid}",
                     ent=ent,
                     field="id_type",
@@ -514,7 +515,31 @@ def generate_edge_types_from_entities(entities: list) -> list:
     """
     from .knowledge_graph import EDGES
     
-    # check connectivity of the knowledge graph based on selected entities
+    # Get only user-selected entity types (not including connectivity analysis)
+    selected_types = set()
+    for ent in entities:
+        if ent.get("entity_type", "").strip():
+            selected_types.add(ent.get("entity_type"))
+    
+    # Generate edge types only for actually selected entities
+    edge_types = []
+    for source, target in EDGES:
+        if source in selected_types and target in selected_types:
+            edge_type = f"{source}-{target}"
+            if edge_type not in edge_types:
+                edge_types.append(edge_type)
+    
+    return sorted(edge_types)
+
+
+def generate_edge_types_with_connectivity(entities: list) -> list:
+    """
+    Generate edge types based on selected entities including connectivity analysis.
+    This is used for processing to ensure graph connectivity.
+    """
+    from .knowledge_graph import EDGES
+    
+    # Check connectivity of the knowledge graph based on selected entities
     connectivity_analysis = analyze_knowledge_graph_connectivity(entities)
     selected_types = set()
     
@@ -522,7 +547,7 @@ def generate_edge_types_from_entities(entities: list) -> list:
         if ent.get("entity_type", "").strip():
             selected_types.add(ent.get("entity_type"))
     
-    # Add suggested virtual nodes
+    # Add suggested virtual nodes for connectivity
     for missing_node in connectivity_analysis["missing_nodes"]:
         selected_types.add(missing_node)
     

@@ -18,7 +18,7 @@ import atexit
 class TempFileManager:
     """Manages temporary files for multi-user, multi-task environment"""
     
-    def __init__(self, project_root: str = ".", temp_dir: str = "temp", cleanup_interval_minutes: int = 1, auto_cleanup_on_startup: bool = True):
+    def __init__(self, project_root: str = ".", temp_dir: str = "temp", cleanup_interval_minutes: int = 10, auto_cleanup_on_startup: bool = True):
         self.project_root = Path(project_root)
         self.temp_dir = self.project_root / temp_dir
         self.cleanup_interval_minutes = cleanup_interval_minutes
@@ -29,7 +29,7 @@ class TempFileManager:
             self._setup_temp_dir()
         else:
             self.temp_dir.mkdir(parents=True, exist_ok=True)
-            print(f"📁 Temp directory ready: {self.temp_dir}")
+            print(f"Temp directory ready: {self.temp_dir}")
         
         # Start cleanup thread (only once globally)
         global _cleanup_started
@@ -44,11 +44,11 @@ class TempFileManager:
         try:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
-                print(f"🧹 Cleaned up temp directory on startup: {self.temp_dir}")
+                print(f" Cleaned up temp directory on startup: {self.temp_dir}")
             self.temp_dir.mkdir(parents=True, exist_ok=True)
-            print(f"📁 Temp directory initialized: {self.temp_dir}")
+            print(f"Temp directory initialized: {self.temp_dir}")
         except Exception as e:
-            print(f"❌ Error setting up temp directory: {e}")
+            print(f"Error setting up temp directory: {e}")
     
     def get_session_job_dir(self, create_if_not_exists: bool = True) -> Path:
         """Get or create job directory for current session"""
@@ -64,7 +64,7 @@ class TempFileManager:
         # Create directory by default for new sessions
         if create_if_not_exists and not job_dir.exists():
             job_dir.mkdir(parents=True, exist_ok=True)
-            print(f"📁 Created job directory: {job_dir}")
+            print(f"Created job directory: {job_dir}")
         
         return job_dir
     
@@ -87,10 +87,10 @@ class TempFileManager:
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            print(f"💾 Saved file: {safe_filename} to {job_dir}")
+            print(f"Saved file: {safe_filename} to {job_dir}")
             return str(file_path)
         except Exception as e:
-            print(f"❌ Error saving file {safe_filename}: {e}")
+            print(f"Error saving file {safe_filename}: {e}")
             return ""
     
     def save_label_file(self, uploaded_file) -> str:
@@ -109,10 +109,10 @@ class TempFileManager:
             with open(file_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
             
-            print(f"🏷️ Saved label file: {original_name} to {job_dir}")
+            print(f"Saved label file: {original_name} to {job_dir}")
             return str(file_path)
         except Exception as e:
-            print(f"❌ Error saving label file {original_name}: {e}")
+            print(f"Error saving label file {original_name}: {e}")
             return ""
     
     def get_current_job_info(self) -> Dict[str, Any]:
@@ -148,12 +148,12 @@ class TempFileManager:
                     
                     if dir_mtime < cutoff_time:
                         shutil.rmtree(job_dir)
-                        print(f"🧹 Cleaned up old job directory: {job_dir.name}")
+                        print(f"Cleaned up old job directory: {job_dir.name}")
                 except Exception as e:
-                    print(f"❌ Error cleaning up {job_dir.name}: {e}")
+                    print(f"Error cleaning up {job_dir.name}: {e}")
         
         except Exception as e:
-            print(f"❌ Error during cleanup: {e}")
+            print(f"Error during cleanup: {e}")
     
     def _start_cleanup_thread(self):
         """Start background cleanup thread"""
@@ -161,26 +161,26 @@ class TempFileManager:
         global _cleanup_started, _cleanup_thread
         
         if _cleanup_started and _cleanup_thread is not None and _cleanup_thread.is_alive():
-            print(f"🧹 Global cleanup thread already running")
+            print(f"Global cleanup thread already running")
             return
         
         def cleanup_worker():
-            print(f"🧹 Global cleanup worker started (interval: {self.cleanup_interval_minutes} minutes)")
+            print(f"Global cleanup worker started (interval: {self.cleanup_interval_minutes} minutes)")
             while True:
                 try:
                     time.sleep(self.cleanup_interval_minutes * 60)  # Sleep for cleanup interval
-                    print(f"🧹 Running scheduled cleanup...")
+                    print(f"Running scheduled cleanup...")
                     # Get the current temp manager instance for cleanup
                     current_manager = get_temp_manager()
                     current_manager._cleanup_old_jobs()
                 except Exception as e:
-                    print(f"❌ Error in cleanup thread: {e}")
+                    print(f"Error in cleanup thread: {e}")
         
         _cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
         _cleanup_thread.start()
         _cleanup_started = True
         self._cleanup_started = True
-        print(f"🧹 Started global cleanup thread (interval: {self.cleanup_interval_minutes} minutes)")
+        print(f"Started global cleanup thread (interval: {self.cleanup_interval_minutes} minutes)")
     
     def get_cleanup_thread_status(self) -> Dict[str, Any]:
         """Get status of cleanup thread"""
@@ -200,19 +200,19 @@ class TempFileManager:
         try:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
-                print(f"🧹 Cleaned up temp directory on exit: {self.temp_dir}")
+                print(f"Cleaned up temp directory on exit: {self.temp_dir}")
         except Exception as e:
-            print(f"❌ Error during exit cleanup: {e}")
+            print(f"Error during exit cleanup: {e}")
     
     def force_cleanup_all(self):
         """Force cleanup of all temporary files"""
         try:
             if self.temp_dir.exists():
                 shutil.rmtree(self.temp_dir)
-                print(f"🧹 Force cleaned up all temp files")
+                print(f"Force cleaned up all temp files")
             self.temp_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            print(f"❌ Error during force cleanup: {e}")
+            print(f"Error during force cleanup: {e}")
     
     def get_temp_stats(self) -> Dict[str, Any]:
         """Get statistics about temporary files"""
@@ -248,7 +248,7 @@ class TempFileManager:
                 })
         
         except Exception as e:
-            print(f"❌ Error getting temp stats: {e}")
+            print(f"Error getting temp stats: {e}")
         
         return stats
     
@@ -272,12 +272,12 @@ class TempFileManager:
                 file_path = job_dir / f"{entity_label}{ext}"
                 if file_path.exists():
                     file_path.unlink()
-                    print(f"🗑️ Deleted file: {file_path.name}")
+                    print(f"Deleted file: {file_path.name}")
                     deleted = True
             
             return deleted
         except Exception as e:
-            print(f"❌ Error deleting file for {entity_label}: {e}")
+            print(f"Error deleting file for {entity_label}: {e}")
             return False
 
     def delete_label_file(self, filename: str) -> bool:
@@ -296,11 +296,11 @@ class TempFileManager:
             
             if file_path.exists():
                 file_path.unlink()
-                print(f"🗑️ Deleted label file: {filename}")
+                print(f"Deleted label file: {filename}")
                 return True
             return False
         except Exception as e:
-            print(f"❌ Error deleting label file {filename}: {e}")
+            print(f"Error deleting label file {filename}: {e}")
             return False
     
     def handle_file_upload_change(self, uploaded_file, entity_label: str, previous_file_key: str) -> str:
@@ -343,19 +343,19 @@ class TempFileManager:
                                 # We had a file in the last run, but now uploader is None
                                 # This means user clicked X button to clear it
                                 self.delete_uploaded_file(entity_label)
-                                print(f"🗑️ Auto-deleted file for entity '{entity_label}' (user cleared uploader)")
+                                print(f"Auto-deleted file for entity '{entity_label}' (user cleared uploader)")
                                 st.session_state[previous_file_key] = False
                                 st.session_state[last_run_key] = False
                                 return ""
                             else:
                                 # This is likely a page refresh - preserve the file
-                                print(f"🔄 Page refresh detected - preserving existing file for entity '{entity_label}'")
+                                print(f"Page refresh detected - preserving existing file for entity '{entity_label}'")
                                 st.session_state[last_run_key] = False
                                 return str(file_path)
                     
                     # No file found on disk
                     if had_file_last_run:
-                        print(f"🗑️ File for entity '{entity_label}' was cleared by user")
+                        print(f"File for entity '{entity_label}' was cleared by user")
                     st.session_state[previous_file_key] = False
                     st.session_state[last_run_key] = False
                     return ""
@@ -390,7 +390,7 @@ class TempFileManager:
             if previous_filename and previous_filename != uploaded_file.name:
                 # User uploaded a different file - clean up the old one
                 self.delete_label_file(previous_filename)
-                print(f"🗑️ Replaced label file: '{previous_filename}' → '{uploaded_file.name}'")
+                print(f"Replaced label file: '{previous_filename}' → '{uploaded_file.name}'")
             
             st.session_state[previous_file_key] = True
             st.session_state[previous_filename_key] = uploaded_file.name
@@ -409,19 +409,19 @@ class TempFileManager:
                             # We had a file in the last run, but now uploader is None
                             # This means user clicked X button to clear it
                             self.delete_label_file(previous_filename)
-                            print(f"🗑️ Auto-deleted label file '{previous_filename}' (user cleared uploader)")
+                            print(f"Auto-deleted label file '{previous_filename}' (user cleared uploader)")
                             st.session_state[previous_file_key] = False
                             st.session_state[previous_filename_key] = ""
                             st.session_state[last_run_key] = False
                             return ""
                         else:
                             # This is likely a page refresh - preserve the file
-                            print(f"🔄 Page refresh detected - preserving existing label file: '{previous_filename}'")
+                            print(f"Page refresh detected - preserving existing label file: '{previous_filename}'")
                             st.session_state[last_run_key] = False
                             return str(file_path)
                     else:
                         # File doesn't exist on disk anymore
-                        print(f"🗑️ Label file '{previous_filename}' was already removed")
+                        print(f"Label file '{previous_filename}' was already removed")
                         st.session_state[previous_file_key] = False
                         st.session_state[previous_filename_key] = ""
                         st.session_state[last_run_key] = False

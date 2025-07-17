@@ -3,19 +3,11 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from backend.finalize import finalize
+from backend.hard_match import process_entity_hard_match
+from backend.soft_match import process_entity_soft_match
 
 __all__ = ["process"]
 
-def _read_mapping(database_path, entity_type):
-    path = os.path.join(
-        database_path,
-        "Entity",
-        entity_type,
-        f"BioMedGraphica_Conn_{entity_type}.csv",
-    )
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Mapping file not found: {path}")
-    return pd.read_csv(path)
 
 def _read_sample_ids(file_path):
     sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
@@ -83,12 +75,45 @@ def _process_omics_entity(cfg, common_ids, database_path, output_dir):
     file_path = cfg.get("file_path", "")
     fill0 = cfg.get("fill0", False)
     match_mode = cfg.get("match_mode", "hard").lower()
+    
+    # Debug: Print the configuration for all entities
+    print(f" Entity configuration:")
+    print(f" - feature_label: {feature_label}")
+    print(f" - entity_type: {entity_type}")
+    print(f" - id_type: {id_type}")
+    print(f" - match_mode: {match_mode}")
+    print(f" - file_path: {file_path}")
+    print(f" - fill0: {fill0}")
 
     if (fill0) and id_type:
+        print(f"Error: fill0={fill0} and id_type='{id_type}' for {entity_type}")
         return {"feature_label": feature_label, "status": "error", "error": "id_type must be empty for fill0"}
 
     try:
+        # Validate match_mode
+        if match_mode not in ("hard", "soft"):
+            return {
+                "feature_label": feature_label,
+                "status": "error",
+                "error": f"Unknown match_mode '{match_mode}', expected 'hard' or 'soft'"
+            }
+
+        # Handle virtual nodes with soft mode
+        if fill0 and match_mode == "soft":
+            print(f"Warning: Virtual node {feature_label} has soft match mode - switching to hard")
+            match_mode = "hard"
+
+        # If not a virtual node, check file existence
+        if not fill0 and not os.path.exists(file_path):
+            print(f"File not found: {file_path}")
+            return {
+                "feature_label": feature_label,
+                "status": "error",
+                "error": f"File not found: {file_path}"
+            }
+
         if match_mode == "hard":
+            print(f"Processing (hard match): {feature_label}")
             return process_entity_hard_match(
                 entity_type=entity_type,
                 id_type=id_type,
@@ -99,120 +124,25 @@ def _process_omics_entity(cfg, common_ids, database_path, output_dir):
                 sample_ids=common_ids,
                 output_dir=output_dir,
             )
+
         elif match_mode == "soft":
-            return _process_soft_entity(cfg, common_ids, database_path, output_dir)
-        else:
-            return {
-                "feature_label": feature_label,
-                "status": "error",
-                "error": f"Unknown match_mode '{match_mode}', expected 'hard' or 'soft'"
-            }
+            print(f"Processing (soft match): {feature_label}")
+            return process_entity_soft_match(
+                entity_type=entity_type,
+                file_path=file_path,
+                feature_label=feature_label,
+                database_path=database_path,
+                sample_ids=common_ids,
+                output_dir=output_dir,
+                interactive_mode=True,
+            )
 
     except Exception as e:
-        return {"feature_label": feature_label, "status": "error", "error": str(e)}
-
-def _process_soft_entity(cfg, sample_ids, database_path, output_dir):
-    entity_type = cfg["entity_type"].lower()
-    if entity_type == "disease":
-        return process_entity_soft_match(
-            entity_type=cfg["entity_type"],
-            id_type=cfg.get("id_type", ""),
-            file_path=cfg["file_path"],
-            feature_label=cfg["feature_label"],
-            database_path=database_path,
-            sample_ids=sample_ids,
-            output_dir=output_dir
-        )
-    else:
         return {
-            "feature_label": cfg.get("feature_label"),
+            "feature_label": feature_label,
             "status": "error",
-            "error": f"Soft match not implemented for entity_type='{entity_type}'"
+            "error": str(e)
         }
-
-def process_entity_hard_match(entity_type, id_type, file_path, feature_label, database_path, fill0=False, sample_ids=None, output_dir="cache"):
-    entity_type = entity_type.capitalize()
-    entity_data = _read_mapping(database_path, entity_type)
-    bmg_ids = entity_data["BioMedGraphica_Conn_ID"].drop_duplicates().tolist()
-
-    os.makedirs(os.path.join(output_dir, "_x"), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, "raw_id_mapping"), exist_ok=True)
-
-    if fill0:
-        print(f"Filling zeros for {feature_label} with {len(sample_ids)}samples and {len(bmg_ids)} BioMedGraphica IDs...")
-        if sample_ids is None:
-            raise ValueError("sample_ids must be provided when fill0=True")
-        data_matrix = pd.DataFrame(0, index=sample_ids, columns=bmg_ids)
-        data_matrix.index.name = "Sample_ID"
-        data_matrix.reset_index(inplace=True)
-        data_matrix["Sample_ID"] = data_matrix["Sample_ID"].astype(str)
-        np.save(os.path.join(output_dir, "_x", f"{feature_label.lower()}.npy"), data_matrix.drop(columns=["Sample_ID"]).values)
-        # data_matrix.to_csv(os.path.join(output_dir, "_x", f"{feature_label.lower()}.csv"), index=False)
-        mapping_df = pd.DataFrame({
-            "BioMedGraphica_Conn_ID": bmg_ids,
-            "Original_ID": ["" for _ in bmg_ids],
-        })
-        mapping_df.to_csv(os.path.join(output_dir, "raw_id_mapping", f"{feature_label.lower()}_id_map.csv"), index=False)
-        return {"feature_label": feature_label, "status": "success"}
-
-    sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
-    df = pd.read_csv(file_path, sep=sep)
-    df.rename(columns={df.columns[0]: "Sample_ID"}, inplace=True)
-    df["Sample_ID"] = df["Sample_ID"].astype(str)
-
-    melted = df.melt(id_vars="Sample_ID", var_name="Original_ID", value_name="value")
-    used_ids = set(df.columns) - {"Sample_ID"}
-
-    mapping_raw = entity_data[[id_type, "BioMedGraphica_Conn_ID"]].dropna()
-    mapping_raw[id_type] = mapping_raw[id_type].astype(str).str.strip()
-    mapping_expanded = mapping_raw.assign(Original_ID=mapping_raw[id_type].str.split(";")).explode("Original_ID")
-    mapping_expanded["Original_ID"] = mapping_expanded["Original_ID"].str.strip()
-    mapping_df = mapping_expanded[mapping_expanded["Original_ID"].isin(used_ids)]
-    mapping_df = mapping_df[["Original_ID", "BioMedGraphica_Conn_ID"]].drop_duplicates()
-
-    print(f"[DEBUG] mapping_df rows: {len(mapping_df)}")
-
-    merged = pd.merge(melted, mapping_df, on="Original_ID", how="inner")
-
-    print(f"[DEBUG] merged shape: {merged.shape}")
-
-    expr = merged.pivot_table(index="Sample_ID", columns="BioMedGraphica_Conn_ID", values="value", fill_value=0)
-    
-    # print(f"[DEBUG] Before reindex - expr shape: {expr.shape}")
-    # print(f"[DEBUG] expr.index (first 5): {list(expr.index[:5])}")
-    # print(f"[DEBUG] sample_ids (first 5): {sample_ids[:5]}")
-    # print(f"[DEBUG] expr non-zero values count: {(expr != 0).sum().sum()}")
-
-    common_samples = set(expr.index) & set(sample_ids)
-    # print(f"[DEBUG] Common samples count: {len(common_samples)} / {len(sample_ids)}")
-    
-    expr = expr.reindex(index=sample_ids, columns=bmg_ids, fill_value=0)
-    
-    # print(f"[DEBUG] After reindex - expr shape: {expr.shape}")
-    # print(f"[DEBUG] expr non-zero values count: {(expr != 0).sum().sum()}")
-
-
-    np.save(os.path.join(output_dir, "_x", f"{feature_label.lower()}.npy"), expr.values)
-    # expr.to_csv(os.path.join(output_dir, "_x", f"{feature_label.lower()}.csv"))
-
-    grouped_mapping_df = (
-        mapping_df.groupby("BioMedGraphica_Conn_ID")["Original_ID"]
-        .apply(lambda x: ";".join(sorted(set(str(i) for i in x if pd.notna(i) and str(i).strip()))))
-        .reset_index()
-    )
-    final_mapping_df = pd.DataFrame({"BioMedGraphica_Conn_ID": bmg_ids}).merge(
-        grouped_mapping_df, on="BioMedGraphica_Conn_ID", how="left"
-    ).fillna({"Original_ID": ""})
-
-    final_mapping_df.to_csv(os.path.join(output_dir, "raw_id_mapping", f"{feature_label.lower()}_id_map.csv"), index=False)
-    return {"feature_label": feature_label, "status": "success"}
-
-def process_entity_soft_match(entity_type, id_type, file_path, feature_label, database_path, sample_ids, output_dir):
-    return {
-        "feature_label": feature_label,
-        "status": "error",
-        "error": f"Soft match for entity_type='{entity_type}' is not implemented yet"
-    }
 
 def process(*configs, database_path, output_dir, file_order=None, apply_zscore=False, edge_types=None):
     common_ids = _compute_common_sample_ids(configs)
@@ -224,10 +154,52 @@ def process(*configs, database_path, output_dir, file_order=None, apply_zscore=F
 
     # Step 2: process omics entities
     omics_cfgs = [c for c in configs if c["entity_type"].lower() != "label"]
-    for cfg in tqdm(omics_cfgs, desc="Processing", unit="entity"):
-        results.append(_process_omics_entity(cfg, common_ids, database_path, output_dir))
+    
+    # Sort configurations to prioritize soft match entities first
+    soft_match_cfgs = [cfg for cfg in omics_cfgs if cfg.get("match_mode", "hard").lower() == "soft"]
+    hard_match_cfgs = [cfg for cfg in omics_cfgs if cfg.get("match_mode", "hard").lower() == "hard"]
+    
+    # Process soft match entities first, then hard match entities
+    ordered_cfgs = soft_match_cfgs + hard_match_cfgs
+    
+    print(f"Found {len(omics_cfgs)} omics entities to process:")
+    print(f"  - {len(soft_match_cfgs)} soft match entities (processed first)")
+    print(f"  - {len(hard_match_cfgs)} hard match entities (processed after)")
+    
+    for i, cfg in enumerate(ordered_cfgs):
+        priority = "SOFT" if cfg.get("match_mode", "hard").lower() == "soft" else "🔧 HARD"
+        print(f" {i+1}. {cfg['feature_label']} ({cfg['entity_type']}) - {priority}")
+    
+    for cfg in tqdm(ordered_cfgs, desc="Processing", unit="entity"):
+        print(f"\nProcessing entity: {cfg['feature_label']}")
+        result = _process_omics_entity(cfg, common_ids, database_path, output_dir)
+        print(f"  Result: {result.get('status', 'unknown')}")
+        
+        if result.get('status') == 'error':
+            print(f"  Error: {result.get('error', 'unknown error')}")
+        elif result.get('status') == 'pending_user_selection':
+            print(f"  Waiting for user selection: {result.get('message', 'Please complete mappings')}")
+            # Store this pending result and continue the loop (don't return immediately)
+            results.append(result)
+            
+            # After each entity that needs mapping, return to the UI to let user complete mappings
+            return {
+                "common_sample_ids": common_ids,
+                "results": results,  # Include all results so far
+                "summary": {
+                    "total": len(results),
+                    "success": sum(1 for r in results if r["status"] == "success"),
+                    "error": sum(1 for r in results if r["status"] == "error"),
+                    "pending": sum(1 for r in results if r["status"] == "pending_user_selection")
+                },
+                "status": "pending_user_interaction",
+                "message": f"Please complete ID mappings for {cfg['feature_label']} and rerun the process."
+            }
+        
+        results.append(result)
 
     # Step 3: prepare feature_order
+    # Use original omics_cfgs order for feature_order, not the processing order
     available_labels = [cfg["feature_label"] for cfg in omics_cfgs]
     if file_order is None:
         feature_order = available_labels
