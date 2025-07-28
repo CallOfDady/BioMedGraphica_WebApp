@@ -4,14 +4,13 @@ import streamlit as st
 import networkx as nx
 from pyvis.network import Network
 import streamlit.components.v1 as components
-from biomedgraphica_app_constants import ENTITY_TYPES_COLORS, NODE_POSITIONS, EDGES
-from utils.temp_manager import get_temp_manager
+from frontend.constants import ENTITY_TYPES_COLORS, NODE_POSITIONS, EDGES
 import os
 
 selected_color = "black"  # Color for selected nodes and edges
 error_color = "#ff0000"  # Color for errors (missing nodes, broken paths)
 
-def render_knowledge_graph():
+def render_knowledge_graph(job_manager):
     st.subheader("🧠 Knowledge Graph")
     
     # Retrieve selected entity types (from session_state.entities)
@@ -151,9 +150,8 @@ def render_knowledge_graph():
     net.save_graph("temp_graph.html")
     
     # Move the graph to the session's temp directory
-    temp_manager = get_temp_manager()
     if "job_id" in st.session_state:
-        job_dir = temp_manager.get_session_job_dir(create_if_not_exists=True)
+        job_dir = job_manager.get_job_dir()
         temp_graph_path = job_dir / "temp_graph.html"
         
         # Move the file to temp directory

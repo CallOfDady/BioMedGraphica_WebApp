@@ -2,9 +2,9 @@ import streamlit as st
 from pathlib import Path
 
 
-def render_job_status_panel(temp_manager):
+def render_job_status_panel(job_manager):
 
-    job_info = temp_manager.get_current_job_info()
+    job_info = job_manager.get_job_info()
 
     with st.expander("📊 Current Job Status", expanded=False):
         if job_info:
@@ -28,10 +28,10 @@ def render_job_status_panel(temp_manager):
         # # Control buttons
         # col1, col2 = st.columns(2)
         # with col1:
-        #     if st.button("🧹 Force Clean All Temp Files"):
-        #         temp_manager.force_cleanup_all()
+        #     if st.button("🧹 Force Clean All job Files"):
+        #         job_manager.force_cleanup_all()
         #         st.rerun()
         # with col2:
         #     if st.button("🔄 Manual Cleanup Old Jobs"):
-        #         temp_manager.manual_cleanup_old_jobs()
+        #         job_manager.manual_cleanup_old_jobs()
         #         st.rerun()

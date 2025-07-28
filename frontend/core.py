@@ -6,16 +6,23 @@ biomedgraphica_core.py
 import json, uuid, os
 from typing import Dict, List
 
-from biomedgraphica_app_constants import (
+from frontend.constants import (
     ENTITY_TYPES, ID_TYPES, DEFAULT_ENTITY_ORDER,
     get_display_ids_for_entity, get_id_info_from_display
 )
-from components.entity_row import render_entity_row, validate_entities, check_label_file, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
-from components.log_console import render_log_console, log_to_console
-from components.knowledge_graph import render_knowledge_graph
-from components.job_status_panel import render_job_status_panel
-from utils.temp_manager import get_temp_manager
-from utils.app_init import initialize_app
+
+from frontend.utils.job_manager import get_job_manager
+from frontend.init_job_manager import initialize_job_manager
+
+from frontend.components.job_status_panel import render_job_status_panel
+
+from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
+from frontend.components.log_console import render_log_console, log_to_console
+from frontend.components.knowledge_graph import render_knowledge_graph
+
+from frontend.components.mapping_selector import render_mapping_selector
+
+from frontend.api.client import submit_async_processing_task, submit_mappings_to_backend, check_task_status
 
 import streamlit as st
 import streamlit_nested_layout
@@ -75,8 +82,8 @@ def build_app():
     - Export **graph-ready `.npy` files** for downstream modeling
     """)
     # ---------- App Initialization ----------
-    # Init temp manager, directories, and matcher
-    initialize_app()
+    # Init job manager
+    job_manager, job_id, job_data_output_dir = initialize_job_manager()
 
     # ---------- Session init ----------
     if "entities" not in st.session_state:
@@ -92,9 +99,7 @@ def build_app():
     st.session_state.setdefault("log_messages", ["📟 Processing console initialized."])
 
     # ---------- Job Status Panel ----------
-    temp_manager = get_temp_manager()
-    render_job_status_panel(temp_manager)
-
+    render_job_status_panel(job_manager)
 
     st.divider()
 
@@ -110,7 +115,7 @@ def build_app():
             # Entity rows (import from components/entity_row.py)
             remove_indices = []
             for i, ent in enumerate(st.session_state.entities):
-                if render_entity_row(ent):
+                if render_entity_row(ent, job_manager):
                     remove_indices.append(i)
 
             # Remove selected rows
@@ -198,12 +203,11 @@ def build_app():
             # Label file upload with automatic cleanup when uploader is cleared
             lup = st.file_uploader("Upload Label File", type=["csv", "tsv", "txt"], key="lbl_up", label_visibility="collapsed")
             
-            # Get temp manager and handle label file upload changes
-            temp_manager = get_temp_manager()
+            # handle label file upload changes
             previous_file_key = "_had_label_file"
             previous_filename_key = "_label_filename"
-            saved_label_path = temp_manager.handle_label_file_change(lup, previous_file_key, previous_filename_key)
-            
+            saved_label_path = job_manager.handle_label_file_change(lup, previous_file_key, previous_filename_key)
+
             if saved_label_path:
                 # Label file was uploaded
                 # Check if this is a new upload
@@ -286,10 +290,6 @@ def build_app():
             l, r = st.columns(2)
             with l:
                 st.markdown("#### Entity Order")
-                st.markdown(
-                    "<span style='font-size:14px;'>Drag to reorder entities.</span>",
-                    unsafe_allow_html=True
-                )
 
                 # Get current file order from session state
                 current_file_order = st.session_state.get("file_order", [])
@@ -308,8 +308,12 @@ def build_app():
                     # log_to_console(f"Entity order synced: {' → '.join(updated_order)}")
 
                 if current_file_order:
+                    st.markdown(
+                        "<span style='font-size:14px;'>Drag to reorder entities.</span>",
+                        unsafe_allow_html=True
+                    )
                     # Use dynamic key based on entity count and names to force refresh when entities change
-                    entity_hash = hash(tuple(sorted(current_file_order)))
+                    entity_hash = hash(tuple(current_file_order))
                     sortable_key = f"entity_order_sortable_{entity_hash}"
                     
                     # Use streamlit-sortables for manual reordering
@@ -324,7 +328,7 @@ def build_app():
                     # Display current order
                     st.caption(f"Current order:\n{' → '.join(current_file_order)}")
                 else:
-                    st.info("Entity order will be generated automatically when you proceed from Step 1.")
+                    st.info("Entity order will be generated automatically based on your selected entities.")
 
                 # Z-score normalization checkbox
                 st.checkbox("Apply Z-score", key="zscore_check")
@@ -402,174 +406,108 @@ def build_app():
                 else:
                     st.info("Edge types will be generated automatically based on your selected entities.")
                     
-            db = st.text_input("DB path", "E:/LabWork/BioMedGraphica-Conn")
-            od = st.text_input("Output dir", "cache")
+            db = st.text_input("DB path", "E:/LabWork/BioMedGraphica-Conn") # TODO: make this configurable, currently hardcoded for testing
 
-            # Add collapsible mapping selector above Run button
-            from components.mapping_selector import render_collapsible_mapping_ui
-            has_pending_mappings = render_collapsible_mapping_ui()
-            
-            # Debug: Check mapping sessions
-            print(f"🔍 Mapping sessions debug:")
-            mapping_sessions = [key for key in st.session_state.keys() if key.startswith("mapping_session_")]
-            print(f"  - Found mapping session keys: {mapping_sessions}")
-            for key in mapping_sessions:
-                if not key.endswith("_results"):
-                    session_data = st.session_state[key]
-                    print(f"  - {key}: completed={session_data.get('completed', False)}")
-            
-            # Show processing status if needed
-            if has_pending_mappings:
-                st.info("⏳ ID mappings are required before processing can continue.")
-            
-            # Check if mappings were just confirmed and auto-continue processing
-            just_confirmed_mappings = st.session_state.get("_just_confirmed_mappings", False)
-            if just_confirmed_mappings:
-                # Clear the flag to prevent infinite loop
-                st.session_state["_just_confirmed_mappings"] = False
-                
-                # If we still have pending mappings, something went wrong, don't auto-process
-                if has_pending_mappings:
-                    auto_continue_processing = False
-                    print(f"Warning: Mappings confirmed but still have pending mappings")
-                else:
-                    # Auto-trigger processing
-                    st.info("🔄 Mappings confirmed, continuing processing...")
-                    auto_continue_processing = True
-                    print(f"Auto-continuing processing after mapping confirmation")
-            else:
-                auto_continue_processing = False
-
-            # Back and Run buttons
+            # ---------- Run Controls ----------
             btn_l, btn_r = st.columns([1, 1])
             with btn_l:
                 if st.button("⬅ Back", key="step2_back", use_container_width=True):
                     st.session_state.step1_open, st.session_state.step2_open = True, False
                     st.rerun()
+
             with btn_r:
-                
-                run_button_clicked = st.button("▶️ Run processing", key="step2_run", use_container_width=True)
-                
-                # Process if button clicked or auto-continue after mapping confirmation
-                if run_button_clicked or auto_continue_processing:
-                    if has_pending_mappings:
-                        st.warning("⚠️ Please complete all ID mappings before running processing.")
-                        return
+                run_button_clicked = st.button("▶️ Submit Processing Job", key="step2_run", use_container_width=True)
 
-                    # Build configurations with actual IDs and match modes
-                    cfgs = []
-                    for e in st.session_state.entities:
-                        if e["feature_label"].strip():
-                            # Get actual ID and match mode from display ID
-                            id_info = get_id_info_from_display(e["entity_type"], e["id_type"])
-                            
-                            # Debug: Print configuration for phenotype
-                            if e["entity_type"].lower() == "phenotype":
-                                print(f" Building phenotype config:")
-                                print(f" - entity_type: {e['entity_type']}")
-                                print(f" - id_type (display): {e['id_type']}")
-                                print(f" - id_info: {id_info}")
-                                print(f" - feature_label: {e['feature_label']}")
-                                print(f" - file_path: {e['file_path']}")
-                            
-                            cfgs.append(dict(
-                                feature_label=e["feature_label"],
-                                entity_type=e["entity_type"].lower(),
-                                id_type=id_info["actual_id"],
-                                match_mode=id_info["match_mode"],
-                                file_path=e["file_path"],
-                                fill0=e["fill0"]
-                            ))
-                    if st.session_state.label_path:
-                        cfgs.append(dict(
-                            feature_label="label",
-                            entity_type="label",
-                            id_type="",
-                            file_path=st.session_state.label_path,
-                            fill0=False
+            if run_button_clicked:
+
+                entity_cfgs = []
+                for e in st.session_state.entities:
+                    if e["feature_label"].strip():
+                        id_info = get_id_info_from_display(e["entity_type"], e["id_type"])
+                        entity_cfgs.append(dict(
+                            feature_label=e["feature_label"],
+                            entity_type=e["entity_type"].lower(),
+                            id_type=id_info["actual_id"],
+                            match_mode=id_info["match_mode"],
+                            file_path=e["file_path"],
+                            fill0=e["fill0"]
                         ))
-                    final = dict(
-                        configs=cfgs,
-                        finalize=dict(
-                            file_order=st.session_state.file_order,
-                            apply_zscore=st.session_state.apply_zscore,
-                            edge_types=st.session_state.selected_edge_types,
-                        )
-                    )
-                    
-                    # # Log config to console
-                    # if not has_pending_mappings:
-                    #     log_to_console("⚙️ Processing configuration:")
-                    #     config_lines = json.dumps(final, indent=2).split('\n')
-                    #     for line in config_lines:
-                    #         log_to_console(f"   {line}")
-                    #     log_to_console("🚀 Starting processing...")
-                    
-                    # # Debug: Check mapping sessions before processing
-                    # print(f"Pre-processing mapping session check:")
-                    # for key in st.session_state.keys():
-                    #     if key.startswith("mapping_session_") and not key.endswith("_results"):
-                    #         session_data = st.session_state[key]
-                    #         print(f" - {key}: completed={session_data.get('completed', False)}")
-                    
-                    try:
-                        # Log processing start
-                        # log_to_console("🔄 Processing entities started...")
-                        
-                        from backend.processors import process
-                        res = process(
-                            *final["configs"],
-                            database_path=db,
-                            output_dir=od,
-                            file_order=final["finalize"].get("file_order"),
-                            apply_zscore=final["finalize"].get("apply_zscore", False),
-                            edge_types=final["finalize"].get("edge_types")
-                        )
-                        
-                        # Check if processing is waiting for user interaction
-                        if res.get("status") == "pending_user_interaction":
-                            st.info("⏳ Processing paused - please complete the ID mappings above and try again.")
-                            log_to_console("⏳ Processing paused - ID mappings required")
-                            log_to_console(f"⏳ {res.get('message', 'Processing paused for user interaction.')}")
 
+                label_cfg = None
+                if st.session_state.label_path:
+                    label_cfg = dict(
+                        feature_label="label",
+                        entity_type="label",
+                        id_type="",
+                        file_path=st.session_state.label_path,
+                        fill0=False
+                    )
+
+                final_payload = dict(
+                    job_id=job_id,
+                    entities_cfgs=entity_cfgs,
+                    label_cfg=label_cfg,
+                    database_path=db,
+                    output_dir=job_data_output_dir,
+                    finalize=dict(
+                        file_order=st.session_state.file_order,
+                        apply_zscore=st.session_state.apply_zscore,
+                        edge_types=st.session_state.selected_edge_types,
+                    )
+                )
+
+                # Debug config payload
+                st.code(json.dumps(final_payload, indent=2), language="json")
+
+                # Submit to backend (FastAPI + Celery)
+                with st.spinner("🚀 Submitting job to backend..."):
+                    task_id = submit_async_processing_task(final_payload)
+                    st.session_state["submitted_task_id"] = task_id
+                    st.success(f"✅ Job submitted successfully! Task ID: `{task_id}`")
+
+            # ---------- Async Task Status ----------
+            if "submitted_task_id" in st.session_state:
+                with st.expander("📊 Processing Status", expanded=True):
+                    task_id = st.session_state.submitted_task_id
+                    status = check_task_status(task_id)
+
+                    st.markdown(f"**Task ID**: `{task_id}`")
+                    st.markdown(f"**Status**: `{status.get('state', 'unknown')}`")
+
+                    # Check for specific states
+                    if status.get("state") == "awaiting_mapping":
+                        st.info("🔎 Soft match candidates detected — please resolve mappings.")
+                        mapping_candidates = status["mapping_candidates"]
+
+                        confirmed_mappings = render_mapping_selector(mapping_candidates)
+
+                        if confirmed_mappings:
+                            # Submit confirmed mappings to backend 
+                            # backend/api/processing.py @router.post("/submit-mappings")
+                            submit_mappings_to_backend(task_id, confirmed_mappings)
+                            st.success("✅ Mappings submitted. Processing will resume automatically.")
                             st.rerun()
-                        else:
-                            # Normal completion - log to console
-                            log_to_console("✅ Processing completed successfully!")
-                            log_to_console(f"📊 Results: {res['summary']['success']} / {res['summary']['total']} completed")
-                            
-                            # Clear any completed mapping sessions after successful processing
-                            keys_to_remove = []
-                            for key in st.session_state.keys():
-                                if key.startswith("mapping_session_") and not key.endswith("_results"):
-                                    if st.session_state[key].get("completed", False):
-                                        keys_to_remove.append(key)
-                                        # Also remove associated results key
-                                        results_key = f"{key}_results"
-                                        if results_key in st.session_state:
-                                            keys_to_remove.append(results_key)
-                            
-                            for key in keys_to_remove:
-                                del st.session_state[key]
-                            
-                            # Clear the auto-continue flag
-                            if "_just_confirmed_mappings" in st.session_state:
-                                del st.session_state["_just_confirmed_mappings"]
-                            
-                            
-                            # Force rerun to update UI state
-                            st.rerun()
-                            
-                    except Exception as exc:
-                        st.exception(exc)
-                        log_to_console(f"❌ Error during processing: {exc}")
-                        
-                        # Force rerun to update UI state
-                        st.rerun()
+
+                    elif status.get("state") == "SUCCESS":
+                        st.success("🎉 Processing completed!")
+                        st.download_button(
+                            label="📥 Download Result",
+                            data=status["result_file_bytes"],
+                            file_name="biomedgraphica_output.zip"
+                        )
+                        del st.session_state.submitted_task_id
+
+                    elif status.get("state") == "FAILURE":
+                        st.error("❌ Task failed. Please check logs or retry.")
+                        del st.session_state.submitted_task_id
+
+                    else:
+                        st.info("⏳ Still processing. Please wait or refresh.")
+
 
     with main_right:
         # Graph
-        render_knowledge_graph()
+        render_knowledge_graph(job_manager)
 
         st.divider()
 

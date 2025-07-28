@@ -11,5 +11,7 @@
 *manage_temp.py
 
 *temp/*
+*tests/*
+*archive/*
 
 *.ipynb

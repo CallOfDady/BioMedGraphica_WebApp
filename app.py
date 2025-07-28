@@ -10,7 +10,7 @@ To run the app, use the command:
 """
 
 import streamlit as st
-from biomedgraphica_app_core import build_app
+from frontend.core import build_app
 
 if __name__ == "__main__":
     # Build and run the Streamlit app

@@ -3,9 +3,7 @@
 import streamlit as st
 import os
 import streamlit_nested_layout
-from biomedgraphica_app_constants import ENTITY_TYPES, ID_TYPES, get_display_ids_for_entity, get_id_info_from_display
-from .knowledge_graph import ENTITY_TYPES_COLORS
-from utils.temp_manager import get_temp_manager
+from frontend.constants import ENTITY_TYPES,ENTITY_TYPES_COLORS, ID_TYPES, get_display_ids_for_entity, get_id_info_from_display
 
 def match_entity_type(filename: str) -> str | None:
     name_lower = filename.lower()
@@ -82,7 +80,7 @@ def bind_selectbox(label: str, options: list[str], key: str, ent: dict, field: s
 
 # ---------- MAIN RENDER FUNCTION ----------
 
-def render_entity_row(ent: dict) -> bool:
+def render_entity_row(ent: dict, job_manager) -> bool:
     uuid = ent["uuid"]
     remove = False
 
@@ -93,10 +91,9 @@ def render_entity_row(ent: dict) -> bool:
         st.markdown("<div style='height: 2.0em'></div>", unsafe_allow_html=True)
         if st.button("✖", key=f"rm_{uuid}"):
             # Delete associated file before removing entity
-            temp_manager = get_temp_manager()
             entity_label = ent.get("feature_label", "").strip()
             if entity_label:
-                temp_manager.delete_uploaded_file(entity_label)
+                job_manager.delete_uploaded_entity_file(entity_label)
                 log_to_console(f"🗑️ Deleted files for entity: `{entity_label}`")
             return True
 
@@ -232,10 +229,7 @@ def render_entity_row(ent: dict) -> bool:
             # File upload with automatic cleanup when uploader is cleared
             upf = st.file_uploader("Upload", type=["csv", "tsv", "txt"],
                                    key=f"upl_{uuid}", label_visibility="collapsed")
-            
-            # Get temp manager and handle file upload changes
-            temp_manager = get_temp_manager()
-            
+
             # Determine entity label for filename
             entity_label = ent.get("feature_label", "").strip()
             if not entity_label and upf is not None:
@@ -247,8 +241,8 @@ def render_entity_row(ent: dict) -> bool:
             
             # Use auto-cleanup method to handle file upload/clear
             previous_file_key = f"_had_file_{uuid}"
-            saved_path = temp_manager.handle_file_upload_change(upf, entity_label, previous_file_key)
-            
+            saved_path = job_manager.handle_entity_file_change(upf, entity_label, previous_file_key)
+
             if saved_path:
                 # File was uploaded
                 # Check if this is a new upload (avoid re-processing same file)
