@@ -8,56 +8,73 @@ def render_mapping_selector(candidate_data: List[Dict[str, Any]]) -> Optional[Li
 
     structured_mappings = []
 
-    tabs = st.tabs([f"{d['entity_type']}" for d in candidate_data])
+    # Use a form to prevent rerun on every selectbox change
+    with st.form("mapping_form"):
+        st.markdown("### 🔍 Soft Match Mapping Selection")
+        st.markdown("Please select the best matches for each original ID. Changes will only be processed when you click 'Confirm Mappings'.")
+        
+        tabs = st.tabs([f"{d['entity_type']} ({d['feature_label']})" for d in candidate_data])
 
-    for i, data in enumerate(candidate_data):
-        entity_type = data["entity_type"]
-        feature_label = data["feature_label"]
-        candidates = data["candidates"]
+        for i, data in enumerate(candidate_data):
+            entity_type = data["entity_type"]
+            feature_label = data["feature_label"]
+            candidates = data["candidates"]
 
-        feature_mappings = []
+            feature_mappings = []
 
-        with tabs[i]:
-            st.markdown(f"### 🧬 {entity_type}")
-            for original_id, options in candidates.items():
-                select_key = f"{entity_type}_{feature_label}_{original_id}"
-                select_options = ["-- No Match --"] + [
-                    f"{cand_id} - {desc}" for cand_id, desc in options
-                ]
+            with tabs[i]:
+                st.markdown(f"### 🧬 {entity_type} ({feature_label})")
+                st.markdown("---")
+                
+                for original_id, options in candidates.items():
+                    select_key = f"{entity_type}_{feature_label}_{original_id}"
+                    select_options = ["-- No Match --"] + [
+                        f"{cand_id} - {desc}" for cand_id, desc in options
+                    ]
 
-                default_value = st.session_state.get(select_key, "-- No Match --")
-                index = select_options.index(default_value) if default_value in select_options else 0
+                    default_value = st.session_state.get(select_key, "-- No Match --")
+                    index = select_options.index(default_value) if default_value in select_options else 0
 
-                selected = st.selectbox(
-                    f"🔗 Match for `{original_id}`",
-                    options=select_options,
-                    index=index,
-                    key=select_key,
-                    label_visibility="collapsed"
-                )
+                    # Create a more prominent display for the original ID
+                    col1, col2 = st.columns([1, 2])
+                    
+                    with col1:
+                        st.markdown(f"**Original ID:**")
+                        st.code(original_id)
+                    
+                    with col2:
+                        selected = st.selectbox(
+                            f"Select match for '{original_id}'",
+                            options=select_options,
+                            index=index,
+                            key=select_key,
+                            help=f"Choose the best match for original ID: {original_id}"
+                        )
 
-                if selected != "-- No Match --":
-                    selected_id, selected_label = selected.split(" - ", 1)
-                else:
-                    selected_id, selected_label = None, None
+                    if selected != "-- No Match --":
+                        selected_id, selected_label = selected.split(" - ", 1)
+                    else:
+                        selected_id, selected_label = None, None
 
-                feature_mappings.append({
-                    "original_id": original_id,
-                    "selected_id": selected_id,
-                    "selected_label": selected_label
-                })
+                    feature_mappings.append({
+                        "original_id": original_id,
+                        "selected_id": selected_id,
+                        "selected_label": selected_label
+                    })
 
-        structured_mappings.append({
-            "entity_type": entity_type,
-            "feature_label": feature_label,
-            "mappings": feature_mappings
-        })
+            structured_mappings.append({
+                "entity_type": entity_type,
+                "feature_label": feature_label,
+                "mappings": feature_mappings
+            })
 
-    # Button to confirm mappings
-    if st.button("✅ Confirm Mappings", type="primary"):
-        st.session_state["_confirmed_mappings"] = structured_mappings
-        st.success("Mappings confirmed!")
-        return structured_mappings
+        # Button to confirm mappings (inside the form)
+        confirm_clicked = st.form_submit_button("✅ Confirm Mappings", type="primary")
+        
+        if confirm_clicked:
+            st.session_state["_confirmed_mappings"] = structured_mappings
+            st.success("Mappings confirmed!")
+            return structured_mappings
 
     return None
 

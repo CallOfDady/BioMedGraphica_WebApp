@@ -1,5 +1,6 @@
 # backend/utils/io.py
 
+import os
 import redis
 import json
 import pandas as pd
@@ -32,7 +33,8 @@ def load_mappings_from_redis(job_id: str) -> list[dict]:
     redis_key = f"mappings:{job_id}"
     raw = r.get(redis_key)
     if not raw:
-        raise ValueError(f"No soft match mappings found for job_id: {job_id}")
+        # Return empty list if no mappings found (for hard match only scenarios)
+        return []
 
     try:
         mappings = json.loads(raw)

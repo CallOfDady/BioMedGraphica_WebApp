@@ -1,6 +1,7 @@
 # backend/api/processing.py
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from backend.api.schemas import EntityConfig, LabelConfig, FinalConfig
@@ -9,10 +10,13 @@ from backend.service.task_tracker import update_task_status, get_task_status
 from backend.service.soft_match import generate_soft_match_candidates
 from backend.tasks.steps import run_soft_match_apply
 from backend.utils.io import load_common_ids_from_redis, find_entity_cfg_by_label
+from backend.config import Config
 import logging
 import redis
 import json
 import uuid
+import os
+import os
 
 
 r = redis.Redis()
@@ -22,26 +26,6 @@ router = APIRouter()
 # ---------------------------
 # Request/Response Schemas
 # ---------------------------
-
-# class EntityConfig(BaseModel):
-#     feature_label: str
-#     entity_type: str
-#     id_type: Optional[str]
-#     match_mode: str
-#     file_path: str
-#     fill0: bool = False
-
-# class LabelConfig(BaseModel):
-#     feature_label: str
-#     entity_type: str
-#     id_type: Optional[str]
-#     file_path: str
-#     fill0: bool = False
-
-# class FinalConfig(BaseModel):
-#     file_order: Optional[List[str]]
-#     apply_zscore: bool = False
-#     edge_types: Optional[List[str]]
 
 # Mapping models for soft match
 class MappingItem(BaseModel):
@@ -64,7 +48,6 @@ class ProcessingRequest(BaseModel):
     entities_cfgs: List[EntityConfig]
     label_cfg: Optional[LabelConfig]
     finalize: FinalConfig
-    database_path: str
     output_dir: str
 
 class ProcessingResponse(BaseModel):
@@ -96,7 +79,7 @@ def submit_processing(req: ProcessingRequest, background_tasks: BackgroundTasks)
                     entity_type=cfg["entity_type"],
                     file_path=cfg["file_path"],
                     feature_label=cfg["feature_label"],
-                    database_path=req.database_path,
+                    database_path=Config.DATABASE_PATH,
                     topk=5
                 )
 
@@ -109,7 +92,7 @@ def submit_processing(req: ProcessingRequest, background_tasks: BackgroundTasks)
                 "entities_cfgs": [e.model_dump() for e in req.entities_cfgs],
                 "label_cfg": req.label_cfg.model_dump() if req.label_cfg else None,
                 "finalize": req.finalize.model_dump(),
-                "database_path": req.database_path,
+                "database_path": Config.DATABASE_PATH,
                 "output_dir": req.output_dir
             })
 
@@ -122,7 +105,7 @@ def submit_processing(req: ProcessingRequest, background_tasks: BackgroundTasks)
             entities_cfgs=req.entities_cfgs,
             label_cfg=req.label_cfg,
             finalize=req.finalize,
-            database_path=req.database_path,
+            database_path=Config.DATABASE_PATH,
             output_dir=req.output_dir
         )
 
@@ -154,7 +137,6 @@ def submit_mappings(data: MappingSubmission):
         entities_cfgs=[EntityConfig(**e) for e in task_info["entities_cfgs"]],
         label_cfg=LabelConfig(**task_info["label_cfg"]) if task_info.get("label_cfg") else None,
         finalize=FinalConfig(**task_info["finalize"]),
-        database_path=task_info["database_path"],
         output_dir=task_info["output_dir"]
     )
 
@@ -180,3 +162,54 @@ def check_task_status(task_id: str):
     except Exception as e:
         logging.exception(f"Failed to get status for task {task_id}")
         raise HTTPException(status_code=404, detail="Task not found")
+
+@router.get("/download/{task_id}")
+def download_results(task_id: str):
+    """
+    Download the results zip file for a completed task.
+    """
+    try:
+        status_info = get_task_status(task_id)
+        
+        if not status_info:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        if status_info.get("status") != "SUCCESS":
+            raise HTTPException(status_code=400, detail="Task not completed successfully")
+        
+        zip_file_path = status_info.get("zip_file_path")
+        zip_filename = status_info.get("zip_filename")
+        
+        if not zip_file_path or not os.path.exists(zip_file_path):
+            raise HTTPException(status_code=404, detail="Result file not found")
+        
+        return FileResponse(
+            path=zip_file_path,
+            filename=zip_filename,
+            media_type='application/zip'
+        )
+        
+    except Exception as e:
+        logging.exception(f"Failed to download results for task {task_id}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/config/status")
+def get_config_status():
+    """
+    Get backend configuration status
+    """
+    try:
+        Config.validate_config()
+        return {
+            "status": "ok",
+            "database_path": Config.DATABASE_PATH,
+            "database_exists": True,
+            "message": "Backend configuration is valid"
+        }
+    except ValueError as e:
+        return {
+            "status": "error",
+            "database_path": Config.DATABASE_PATH,
+            "database_exists": False,
+            "message": str(e)
+        }

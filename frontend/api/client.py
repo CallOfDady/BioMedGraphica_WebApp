@@ -29,3 +29,14 @@ def check_task_status(task_id: str) -> dict:
     response = requests.get(url)
     response.raise_for_status()
     return response.json()
+
+def download_results(task_id: str) -> str:
+    """
+    Get download URL for completed task results.
+    """
+    return f"{BACKEND_URL}/api/download/{task_id}"
+
+def check_backend_config():
+    """Check backend configuration status."""
+    response = requests.get(f"{BACKEND_URL}/api/config/status")
+    return response.json()

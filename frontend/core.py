@@ -3,7 +3,7 @@ biomedgraphica_core.py
 
 """
 
-import json, uuid, os
+import json, uuid, os, time
 from typing import Dict, List
 
 from frontend.constants import (
@@ -14,7 +14,7 @@ from frontend.constants import (
 from frontend.utils.job_manager import get_job_manager
 from frontend.init_job_manager import initialize_job_manager
 
-from frontend.components.job_status_panel import render_job_status_panel
+from frontend.components.job_status_panel import render_job_status_panel, check_backend_with_cache, safe_api_call
 
 from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
 from frontend.components.log_console import render_log_console, log_to_console
@@ -27,6 +27,7 @@ from frontend.api.client import submit_async_processing_task, submit_mappings_to
 import streamlit as st
 import streamlit_nested_layout
 from streamlit_sortables import sort_items
+from streamlit_autorefresh import st_autorefresh
 
 
 # --------------------------- HELPERS -------------------------------------
@@ -84,6 +85,9 @@ def build_app():
     # ---------- App Initialization ----------
     # Init job manager
     job_manager, job_id, job_data_output_dir = initialize_job_manager()
+
+    # # Smart backend configuration check with caching
+    # check_backend_with_cache()
 
     # ---------- Session init ----------
     if "entities" not in st.session_state:
@@ -405,8 +409,6 @@ def build_app():
                     st.session_state.selected_edge_types = selected_edges
                 else:
                     st.info("Edge types will be generated automatically based on your selected entities.")
-                    
-            db = st.text_input("DB path", "E:/LabWork/BioMedGraphica-Conn") # TODO: make this configurable, currently hardcoded for testing
 
             # ---------- Run Controls ----------
             btn_l, btn_r = st.columns([1, 1])
@@ -447,7 +449,6 @@ def build_app():
                     job_id=job_id,
                     entities_cfgs=entity_cfgs,
                     label_cfg=label_cfg,
-                    database_path=db,
                     output_dir=job_data_output_dir,
                     finalize=dict(
                         file_order=st.session_state.file_order,
@@ -456,53 +457,107 @@ def build_app():
                     )
                 )
 
-                # Debug config payload
-                st.code(json.dumps(final_payload, indent=2), language="json")
+                # # Debug config payload
+                # st.code(json.dumps(final_payload, indent=2), language="json")
 
-                # Submit to backend (FastAPI + Celery)
+                # Submit to backend (FastAPI + Celery) with error recovery
                 with st.spinner("🚀 Submitting job to backend..."):
-                    task_id = submit_async_processing_task(final_payload)
-                    st.session_state["submitted_task_id"] = task_id
-                    st.success(f"✅ Job submitted successfully! Task ID: `{task_id}`")
+                    try:
+                        task_id = safe_api_call(submit_async_processing_task, final_payload)
+                        st.session_state["submitted_task_id"] = task_id
+                        st.success(f"✅ Job submitted successfully! Task ID: `{task_id}`")
+                    except Exception as e:
+                        st.error(f"❌ Failed to submit job: {e}")
+                        st.info("💡 Please check your backend service and try again.")
 
             # ---------- Async Task Status ----------
             if "submitted_task_id" in st.session_state:
                 with st.expander("📊 Processing Status", expanded=True):
+
+                    # Auto-refresh every 10 seconds for non-terminal states
                     task_id = st.session_state.submitted_task_id
-                    status = check_task_status(task_id)
+                    
+                    try:
+                        status = safe_api_call(check_task_status, task_id)
+                    except Exception as e:
+                        st.error(f"❌ Failed to check task status: {e}")
+                        status = {"status": "unknown"}
+
+                    if status.get("status") not in ("SUCCESS", "FAILURE", "awaiting_mapping"):
+                        st_autorefresh(interval=10000, key="status_autorefresh")
 
                     st.markdown(f"**Task ID**: `{task_id}`")
-                    st.markdown(f"**Status**: `{status.get('state', 'unknown')}`")
+                    st.markdown(f"**Status**: `{status.get('status', 'unknown')}`")
 
                     # Check for specific states
-                    if status.get("state") == "awaiting_mapping":
+                    if status.get("status") == "awaiting_mapping":
                         st.info("🔎 Soft match candidates detected — please resolve mappings.")
-                        mapping_candidates = status["mapping_candidates"]
+                        mapping_candidates = status.get("mapping_candidates", [])
 
-                        confirmed_mappings = render_mapping_selector(mapping_candidates)
+                        if mapping_candidates:
+                            confirmed_mappings = render_mapping_selector(mapping_candidates)
 
-                        if confirmed_mappings:
-                            # Submit confirmed mappings to backend 
-                            # backend/api/processing.py @router.post("/submit-mappings")
-                            submit_mappings_to_backend(task_id, confirmed_mappings)
-                            st.success("✅ Mappings submitted. Processing will resume automatically.")
-                            st.rerun()
+                            if confirmed_mappings:
+                                # Submit confirmed mappings to backend with error recovery
+                                try:
+                                    safe_api_call(submit_mappings_to_backend, task_id, confirmed_mappings)
+                                    st.success("✅ Mappings submitted. Processing will resume automatically.")
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Failed to submit mappings: {e}")
+                        else:
+                            st.warning("⚠️ No mapping candidates available.")
 
-                    elif status.get("state") == "SUCCESS":
+                    elif status.get("status") == "SUCCESS":
                         st.success("🎉 Processing completed!")
-                        st.download_button(
-                            label="📥 Download Result",
-                            data=status["result_file_bytes"],
-                            file_name="biomedgraphica_output.zip"
-                        )
+                        
+                        # Create download URL
+                        download_url = f"http://localhost:8000/api/download/{task_id}"
+                        
+                        # Provide download options
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"""
+                            <a href="{download_url}" target="_blank" style="
+                                display: inline-block;
+                                padding: 0.5rem 1.0rem;
+                                background-color: #ff6b6b;
+                                color: white;
+                                text-decoration: none;
+                                border-radius: 0.25rem;
+                                font-weight: bold;
+                                width: 100%;
+                                text-align: center;
+                                box-sizing: border-box;
+                            ">📥 Download Result</a>
+                            """, unsafe_allow_html=True)
+                        
+                        with col2:
+                            with st.expander("💡 How to choose download location"):
+                                st.markdown("""
+                                **Method 1: Right-click download**
+                                - Right-click the download button
+                                - Select "Save link as..." or "Save target as..."
+                                - Choose your desired location
+                                
+                                **Method 2: Change browser settings**
+                                - Chrome: Settings → Advanced → Downloads → Change location
+                                - Firefox: Settings → General → Downloads → Choose folder
+                                - Edge: Settings → Downloads → Change location
+                                """)
+                        
                         del st.session_state.submitted_task_id
 
-                    elif status.get("state") == "FAILURE":
+                    elif status.get("status") == "FAILURE":
                         st.error("❌ Task failed. Please check logs or retry.")
                         del st.session_state.submitted_task_id
 
                     else:
-                        st.info("⏳ Still processing. Please wait or refresh.")
+                        import time
+                        st.info("⏳ Still processing. Please wait.")
+                        # st.spinner("⏳ Still processing. Please wait...")
+                        with st.spinner("Checking status..."):
+                            time.sleep(5)
 
 
     with main_right:

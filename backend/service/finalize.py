@@ -82,7 +82,7 @@ def filter_and_save_edge_data(database_path, entity_index_id_mapping):
     filtered_edge_data = edge_data[
         edge_data['BMGC_From_ID'].isin(entity_index_id_mapping['BioMedGraphica_Conn_ID']) &
         edge_data['BMGC_To_ID'].isin(entity_index_id_mapping['BioMedGraphica_Conn_ID'])
-    ]
+    ].copy()
 
     # Get unique types from the filtered edge data
     unique_types = filtered_edge_data['Type'].unique().tolist()

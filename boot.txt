@@ -1,0 +1,11 @@
+# Docker redis
+docker run -d -p 6379:6379 redis
+
+# Fast Api
+uvicorn backend.api.main:app --reload
+
+
+# Celery
+celery -A backend.celery_worker worker --loglevel=info --pool=solo
+
+# Streamlit

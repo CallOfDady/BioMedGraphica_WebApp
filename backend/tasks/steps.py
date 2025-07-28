@@ -6,13 +6,14 @@ import pandas as pd
 import json
 import redis
 import logging
-from celery import group
+from celery import group, chord
 from backend.celery_worker import celery_app
 from backend.service.hard_match import process_entity_hard_match
 from backend.service.soft_match import generate_soft_match_candidates, apply_soft_match_selection
 from backend.service.finalize import finalize
 from backend.service.task_tracker import update_task_status
 from backend.utils.io import read_sample_ids_for_entity, load_common_ids_from_redis, find_entity_cfg_by_label, load_mappings_from_redis
+from backend.config import Config
 
 r = redis.Redis()
 
@@ -94,8 +95,11 @@ def run_label_task(label_cfg, output_dir, job_id, common_ids=None):
 
 
 @celery_app.task
-def run_hard_match_task(ent_cfg, database_path, output_dir, job_id, common_ids):
+def run_hard_match_task(ent_cfg, output_dir, job_id, common_ids):
     print(f"[run_hard] {ent_cfg['feature_label']} for job: {job_id}")
+    
+    # # Use database path from config
+    # database_path = Config.DATABASE_PATH
     
     try:
         result = process_entity_hard_match(
@@ -103,7 +107,7 @@ def run_hard_match_task(ent_cfg, database_path, output_dir, job_id, common_ids):
             id_type=ent_cfg["id_type"],
             file_path=ent_cfg["file_path"],
             feature_label=ent_cfg["feature_label"],
-            database_path=database_path,
+            database_path=Config.DATABASE_PATH,
             fill0=ent_cfg.get("fill0", False),
             sample_ids=common_ids,
             output_dir=output_dir
@@ -126,15 +130,18 @@ def run_hard_match_task(ent_cfg, database_path, output_dir, job_id, common_ids):
         }
 
 @celery_app.task
-def run_soft_match_generate(ent_cfg, database_path, job_id):
+def run_soft_match_generate(ent_cfg, job_id):
     feature_label = ent_cfg["feature_label"]
     print(f"[run_soft:generate] {feature_label} for job: {job_id}")
+
+    # # Use database path from config
+    # database_path = Config.DATABASE_PATH
 
     candidates = generate_soft_match_candidates(
         entity_type=ent_cfg["entity_type"],
         file_path=ent_cfg["file_path"],
         feature_label=feature_label,
-        database_path=database_path,
+        database_path=Config.DATABASE_PATH,
         topk=5
     )
 
@@ -160,10 +167,12 @@ def run_soft_match_generate(ent_cfg, database_path, job_id):
     return "awaiting_mapping"
 
 @celery_app.task
-def run_soft_match_apply(ent_cfg, database_path, output_dir, job_id, confirmed_mapping, common_ids):
+def run_soft_match_apply(ent_cfg, output_dir, job_id, confirmed_mapping, common_ids):
     feature_label = ent_cfg["feature_label"]
     print(f"[run_soft:apply] {feature_label} for job: {job_id}")
 
+    # # Use database path from config
+    # database_path = Config.DATABASE_PATH
 
     # 1. Apply mapping (confirmed_mapping is List[Dict[str, Any]])
     # 2. Load feature table + mapping ID + align common_ids
@@ -185,7 +194,7 @@ def run_soft_match_apply(ent_cfg, database_path, output_dir, job_id, confirmed_m
         entity_type=ent_cfg["entity_type"],
         file_path=ent_cfg["file_path"],
         feature_label=feature_label,
-        database_path=database_path,
+        database_path=Config.DATABASE_PATH,
         sample_ids=common_ids,
         user_selections=user_selections,
         output_dir=output_dir
@@ -195,8 +204,9 @@ def run_soft_match_apply(ent_cfg, database_path, output_dir, job_id, confirmed_m
     return result
 
 @celery_app.task
-def finalize_task(finalize_cfg, database_path, output_dir, job_id):
-    print(f"[finalize] job: {job_id}")
+def finalize_task(results, finalize_cfg, output_dir, job_id, task_id):
+    print(f"[finalize] job: {job_id}, task: {task_id}")
+    print(f"[finalize] Received results from {len(results) if isinstance(results, list) else 'unknown'} parallel tasks")
     
     try:
         file_order = finalize_cfg.get("file_order", [])
@@ -207,7 +217,7 @@ def finalize_task(finalize_cfg, database_path, output_dir, job_id):
             raise ValueError("file_order is required for finalization")
 
         result = finalize(
-            database_path=database_path,
+            database_path=Config.DATABASE_PATH,
             cache_dir=output_dir,
             file_order=file_order,
             edge_types=edge_types,
@@ -215,29 +225,78 @@ def finalize_task(finalize_cfg, database_path, output_dir, job_id):
         )
 
         print(f"Finalization complete for job {job_id}")
+        
+        # Create zip file with all results
+        import zipfile
+        import os
+        from pathlib import Path
+        
+        # Create zip filename
+        zip_filename = f"{job_id}_results.zip"
+        zip_path = os.path.join(os.path.dirname(output_dir), zip_filename)
+        
+        print(f"[finalize] Creating zip file: {zip_path}")
+        
+        # Create zip file containing the entire output directory
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            output_path = Path(output_dir)
+            for file_path in output_path.rglob('*'):
+                if file_path.is_file():
+                    # Calculate relative path within the output directory
+                    relative_path = file_path.relative_to(output_path)
+                    zipf.write(file_path, relative_path)
+        
+        print(f"[finalize] Zip file created: {zip_path} ({os.path.getsize(zip_path) / 1024 / 1024:.2f} MB)")
+        
+        # Update task status to SUCCESS with zip file info
+        update_task_status(task_id, "SUCCESS", {
+            "message": "Processing completed successfully",
+            "job_id": job_id,
+            "result": result,
+            "zip_file_path": zip_path,
+            "zip_filename": zip_filename
+        })
+        print(f"[finalize] Updated task {task_id} status to SUCCESS")
+        
         return {
             "status": "success",
             "job_id": job_id,
+            "task_id": task_id,
             "result": result
         }
 
     except Exception as e:
         logging.exception(f"Finalization failed for job {job_id}")
+        
+        # Update task status to FAILURE
+        update_task_status(task_id, "FAILURE", {
+            "message": f"Processing failed during finalization: {str(e)}",
+            "job_id": job_id,
+            "error": str(e)
+        })
+        print(f"[finalize] Updated task {task_id} status to FAILURE")
+        
         return {
             "status": "error",
             "job_id": job_id,
+            "task_id": task_id,
             "error": str(e)
         }
     
 @celery_app.task
-def launch_processing_task(common_ids, config):
+def launch_processing_chord(common_ids, config):
+    """
+    Creates and executes a chord with parallel tasks.
+    This task doesn't wait for results, just creates the chord.
+    """
     entities_cfgs = config["entities_cfgs"]
     label_cfg = config.get("label_cfg")
     job_id = config["job_id"]
     task_id = config["task_id"]
     output_dir = config["output_dir"]
-    database_path = config["database_path"]
+    finalize_cfg = config["finalize"]
 
+    # Remove database_path from config since we use Config.DATABASE_PATH
     mappings = load_mappings_from_redis(job_id)
 
     parallel_tasks = []
@@ -248,21 +307,26 @@ def launch_processing_task(common_ids, config):
     for ent in entities_cfgs:
         mode = ent.get("match_mode", "hard").lower()
         if mode == "hard":
-            parallel_tasks.append(run_hard_match_task.s(ent, database_path, output_dir, job_id, common_ids))
+            parallel_tasks.append(run_hard_match_task.s(ent, output_dir, job_id, common_ids))
         elif mode == "soft":
             mapping_item = next((m for m in mappings if m["feature_label"] == ent["feature_label"]), None)
-            parallel_tasks.append(run_soft_match_apply.s(ent, database_path, output_dir, job_id, mapping_item, common_ids))
+            if mapping_item:
+                parallel_tasks.append(run_soft_match_apply.s(ent, output_dir, job_id, mapping_item, common_ids))
+            else:
+                print(f"[WARNING] No mapping found for soft match entity: {ent['feature_label']}, skipping...")
+                update_task_status(task_id, "error", {"message": f"No mapping found for soft match entity: {ent['feature_label']}"})
+                return {"error": f"No mapping found for soft match entity: {ent['feature_label']}"}
 
     update_task_status(task_id, "processing", {"message": "Main processing tasks running..."})
-    return True
-
-@celery_app.task
-def finalize_stage_task(results, config):
-    finalize_cfg = config["finalize"]
-    database_path = config["database_path"]
-    output_dir = config["output_dir"]
-    job_id = config["job_id"]
-    task_id = config["task_id"]
-
-    # Common IDs will be passed from the previous step
-    return finalize_task.s(finalize_cfg, database_path, output_dir, job_id)()
+    
+    # Execute parallel tasks using chord and finalize
+    if parallel_tasks:
+        print(f"[launch_processing_chord] Creating chord with {len(parallel_tasks)} tasks for job {job_id}")
+        # Create and execute chord - this will handle the parallel execution and callback
+        chord_result = chord(parallel_tasks)(finalize_task.s(finalize_cfg, output_dir, job_id, task_id))
+        return {"status": "chord_created", "parallel_tasks_count": len(parallel_tasks)}
+    else:
+        print(f"[launch_processing_chord] No parallel tasks, running finalize directly for job {job_id}")
+        # If no parallel tasks, directly call finalize with empty results
+        finalize_task.delay([], finalize_cfg, output_dir, job_id, task_id)
+        return {"status": "direct_finalize"}
