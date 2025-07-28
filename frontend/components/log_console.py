@@ -10,7 +10,7 @@ def log_to_console(message: str):
 
 
 def render_log_console():
-    st.markdown("### 📟 Processing Console")
+    st.markdown("### 📟 Session Log")
 
     logs = st.session_state.get("log_messages", [])
 

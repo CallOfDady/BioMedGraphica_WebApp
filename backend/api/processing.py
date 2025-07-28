@@ -105,7 +105,6 @@ def submit_processing(req: ProcessingRequest, background_tasks: BackgroundTasks)
             entities_cfgs=req.entities_cfgs,
             label_cfg=req.label_cfg,
             finalize=req.finalize,
-            database_path=Config.DATABASE_PATH,
             output_dir=req.output_dir
         )
 
