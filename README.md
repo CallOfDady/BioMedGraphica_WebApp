@@ -1,5 +1,9 @@
 # BioMedGraphica Server Setup & Run Instructions
 
+## 🖼️ Interface Preview
+
+![BiomedGraphica Screenshot](./assets/screenshot.png)
+
 ## 🧰 Prerequisites
 
 Ensure the following are installed:
