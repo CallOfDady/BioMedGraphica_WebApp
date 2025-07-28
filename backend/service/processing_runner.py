@@ -16,7 +16,6 @@ def run_pipeline(config: dict):
     job_id = config.get("job_id", "job_x")
     task_id = config.get("task_id", "task_x")
 
-    # Remove database_path from config since tasks use Config.DATABASE_PATH
     update_task_status(task_id, "submitted", {"message": "Pipeline received, preparing tasks."})
 
     return chain(

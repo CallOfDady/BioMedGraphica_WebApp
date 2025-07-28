@@ -6,7 +6,7 @@ def submit_async_processing_task(payload: dict) -> str:
     """
     Call FastAPI backend to submit a processing job.
     """
-    print("Submitting payload to backend:", payload)
+    # print("Submitting payload to backend:", payload)
     url = f"{BACKEND_URL}/api/submit"
     response = requests.post(url, json=payload)
     response.raise_for_status()

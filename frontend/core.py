@@ -447,8 +447,17 @@ def build_app():
 
                 final_payload = dict(
                     job_id=job_id,
-                    entities_cfgs=entity_cfgs,
-                    label_cfg=label_cfg,
+                    entities_cfgs=[
+                        {
+                            **cfg,
+                            "file_path": os.path.abspath(cfg["file_path"]) if cfg["file_path"] else ""
+                        }
+                        for cfg in entity_cfgs
+                    ],
+                    label_cfg={
+                        **label_cfg,
+                        "file_path": os.path.abspath(label_cfg["file_path"]) if label_cfg and label_cfg.get("file_path") else ""
+                    } if label_cfg else None,
                     output_dir=job_data_output_dir,
                     finalize=dict(
                         file_order=st.session_state.file_order,

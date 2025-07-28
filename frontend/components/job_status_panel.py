@@ -42,7 +42,7 @@ def check_backend_with_cache():
         with col2:
             # Optional: manual refresh button
             if st.button(
-                "🔄 Recheck Backend Status",
+                "🔄 Re-Check Backend Status",
                 key="refresh_backend",
                 help="Manually refresh backend status",
             ):

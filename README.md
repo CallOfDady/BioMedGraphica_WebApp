@@ -1,60 +1,107 @@
-# BiomedGraphica Server Setup and Run Instructions
+# BioMedGraphica Server Setup & Run Instructions
 
-## Prerequisites
-Make sure you have the following installed:
-- Python 3.8 or higher
-- Streamlit
-- Required dependencies (see requirements.txt)
+## 🧰 Prerequisites
 
-## Installation
+Ensure the following are installed:
 
-1. Install required packages:
+- Python **3.10+**
+- [Docker](https://www.docker.com/) (for Redis)
+- Required Python packages (`requirements.txt`)
+
+## 📦 Installation
+
 ```bash
-pip install streamlit pandas numpy
+git clone https://github.com/your-org/BioMedGraphica.git
+cd BioMedGraphica
+pip install -r requirements.txt
 ```
 
-## Running the Application
+## 🚀 Running the Application
 
-### Method 1: Using the main app file
+### 1. Start Redis (via Docker)
+
+```bash
+docker run -d -p 6379:6379 redis
+```
+
+### 2. Start FastAPI Backend
+
+```bash
+uvicorn backend.api.main:app --reload
+```
+
+### 3. Start Celery Worker
+
+```bash
+# On Windows:
+celery -A backend.celery_worker worker --loglevel=info --pool=solo
+
+# On Linux/macOS:
+celery -A backend.celery_worker worker --loglevel=info
+```
+
+### 4. Start Streamlit App
+
 ```bash
 streamlit run app.py
 ```
 
-### Method 2: Direct command
-```bash
-python -m streamlit run app.py
+---
+
+## 🌐 Accessing the App
+
+- Local: [http://localhost:8501](http://localhost:8501)  
+- Network: `http://<your-ip>:8501`
+
+---
+
+## ✨ Features
+
+- Upload & configure biomedical entity files
+- Hard & soft match integration
+- Real-time task tracking via Redis
+- Final export: `.npy`, `.csv`, `.zip` output
+
+---
+
+## 🧩 Project Structure
+
+```
+BioMedGraphica/
+├── app.py                  # Streamlit frontend
+├── backend/
+│   ├── api/                # FastAPI endpoints
+│   │   └── main.py
+│   ├── tasks/              # Celery tasks
+│   ├── service/            # Core logic
+│   ├── config.py
+│   └── celery_worker.py
+├── requirements.txt
+└── README.md
 ```
 
-### Method 3: Custom port
+---
+
+## 🛠️ Troubleshooting
+
+- **Redis connection refused**: Make sure Redis is running on port `6379`
+- **Celery not responding**: Confirm both Redis and Celery are running
+- **Firewall issues**: Open necessary ports (`6379`, `8000`, `8501`)
+
+---
+
+## 📌 Notes
+
+- Use `--reload` for development only
+- For production: disable reload and run via Gunicorn + Uvicorn workers
+
+---
+
+## ✅ Health Check
+
+Test the backend:
+
 ```bash
-streamlit run app.py --server.port 8501
+curl http://localhost:8000/health
+# {"status": "healthy", "message": "BioMedGraphica Backend API is running"}
 ```
-
-### Method 4: Open in browser automatically
-```bash
-streamlit run app.py --server.headless false
-```
-
-## Accessing the Application
-- Local URL: http://localhost:8501
-- Network URL: http://your-ip:8501
-
-## Features
-- 🧬 BiomedGraphica Data Integration
-- Upload and configure biomedical entity files
-- Process graph data with custom parameters
-- Export/Import configuration files
-- Real-time status tracking
-
-## Troubleshooting
-- Make sure all required Python packages are installed
-- Check that the backend processors module is available
-- Verify file paths are correct for your system
-- Ensure ports are not blocked by firewall
-
-## Project Structure
-- `app.py` - Main entry point
-- `biomedgraphica_core.py` - Core UI components
-- `biomedgraphica_app_constants.py` - Application constants
-- `backend/` - Processing modules
-- `cache/` - Data cache directory

@@ -70,7 +70,7 @@ def submit_processing(req: ProcessingRequest, background_tasks: BackgroundTasks)
 
         # Check for soft match
         soft_cfgs = [e.model_dump() for e in req.entities_cfgs if e.match_mode == "soft"]
-        print(f"[DEBUG] Soft match configurations: {soft_cfgs}")
+        # print(f"[DEBUG] Soft match configurations: {soft_cfgs}")
 
         if soft_cfgs:
             all_candidates = []

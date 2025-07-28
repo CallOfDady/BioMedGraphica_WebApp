@@ -9,3 +9,5 @@ uvicorn backend.api.main:app --reload
 celery -A backend.celery_worker worker --loglevel=info --pool=solo
 
 # Streamlit
+
+streamlit run app.py

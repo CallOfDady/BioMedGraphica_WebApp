@@ -98,9 +98,6 @@ def run_label_task(label_cfg, output_dir, job_id, common_ids=None):
 def run_hard_match_task(ent_cfg, output_dir, job_id, common_ids):
     print(f"[run_hard] {ent_cfg['feature_label']} for job: {job_id}")
     
-    # # Use database path from config
-    # database_path = Config.DATABASE_PATH
-    
     try:
         result = process_entity_hard_match(
             entity_type=ent_cfg["entity_type"],
@@ -133,9 +130,6 @@ def run_hard_match_task(ent_cfg, output_dir, job_id, common_ids):
 def run_soft_match_generate(ent_cfg, job_id):
     feature_label = ent_cfg["feature_label"]
     print(f"[run_soft:generate] {feature_label} for job: {job_id}")
-
-    # # Use database path from config
-    # database_path = Config.DATABASE_PATH
 
     candidates = generate_soft_match_candidates(
         entity_type=ent_cfg["entity_type"],
@@ -171,16 +165,13 @@ def run_soft_match_apply(ent_cfg, output_dir, job_id, confirmed_mapping, common_
     feature_label = ent_cfg["feature_label"]
     print(f"[run_soft:apply] {feature_label} for job: {job_id}")
 
-    # # Use database path from config
-    # database_path = Config.DATABASE_PATH
-
     # 1. Apply mapping (confirmed_mapping is List[Dict[str, Any]])
     # 2. Load feature table + mapping ID + align common_ids
     # 3. Construct numpy/tensor data, etc.
 
-    print("[DEBUG] Confirmed mapping:")
-    print(confirmed_mapping)
-    print(type(confirmed_mapping))
+    # print("[DEBUG] Confirmed mapping:")
+    # print(confirmed_mapping)
+    # print(type(confirmed_mapping))
 
     # 1. Parse user mapping into dictionary: {original_id: selected_id or None}
     mappings_list = confirmed_mapping.get("mappings", [])
@@ -296,7 +287,6 @@ def launch_processing_chord(common_ids, config):
     output_dir = config["output_dir"]
     finalize_cfg = config["finalize"]
 
-    # Remove database_path from config since we use Config.DATABASE_PATH
     mappings = load_mappings_from_redis(job_id)
 
     parallel_tasks = []

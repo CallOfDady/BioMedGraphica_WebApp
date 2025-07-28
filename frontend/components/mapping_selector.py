@@ -13,7 +13,7 @@ def render_mapping_selector(candidate_data: List[Dict[str, Any]]) -> Optional[Li
         st.markdown("### 🔍 Soft Match Mapping Selection")
         st.markdown("Please select the best matches for each original ID. Changes will only be processed when you click 'Confirm Mappings'.")
         
-        tabs = st.tabs([f"{d['entity_type']} ({d['feature_label']})" for d in candidate_data])
+        tabs = st.tabs([f"{d['entity_type']}" for d in candidate_data])
 
         for i, data in enumerate(candidate_data):
             entity_type = data["entity_type"]
@@ -35,21 +35,13 @@ def render_mapping_selector(candidate_data: List[Dict[str, Any]]) -> Optional[Li
                     default_value = st.session_state.get(select_key, "-- No Match --")
                     index = select_options.index(default_value) if default_value in select_options else 0
 
-                    # Create a more prominent display for the original ID
-                    col1, col2 = st.columns([1, 2])
-                    
-                    with col1:
-                        st.markdown(f"**Original ID:**")
-                        st.code(original_id)
-                    
-                    with col2:
-                        selected = st.selectbox(
-                            f"Select match for '{original_id}'",
-                            options=select_options,
-                            index=index,
-                            key=select_key,
-                            help=f"Choose the best match for original ID: {original_id}"
-                        )
+                    selected = st.selectbox(
+                        f"Select match for '{original_id}'",
+                        options=select_options,
+                        index=index,
+                        key=select_key,
+                        help=f"Choose the best match for original ID: {original_id}"
+                    )
 
                     if selected != "-- No Match --":
                         selected_id, selected_label = selected.split(" - ", 1)
