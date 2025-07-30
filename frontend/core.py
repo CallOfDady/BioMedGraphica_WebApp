@@ -11,10 +11,9 @@ from frontend.constants import (
     get_display_ids_for_entity, get_id_info_from_display
 )
 
-from frontend.utils.job_manager import get_job_manager
 from frontend.init_job_manager import initialize_job_manager
 
-from frontend.components.job_status_panel import render_job_status_panel, check_backend_with_cache, safe_api_call
+from frontend.components.job_status_panel import render_job_status_panel, safe_api_call
 
 from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file
 from frontend.components.log_console import render_log_console, log_to_console
