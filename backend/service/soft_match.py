@@ -11,7 +11,7 @@ def _load_bmg_embeddings(database_path, entity_type):
         database_path,
         "Embed",
         entity_type,
-        f"{entity_type}_embeddings.pt",
+        f"{entity_type}_Embeddings.pt",
     )
     if not os.path.exists(path):
         raise FileNotFoundError(f"Embedding file not found: {path}")
