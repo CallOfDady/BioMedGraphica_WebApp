@@ -16,9 +16,11 @@ from frontend.init_job_manager import initialize_job_manager
 
 from frontend.components.job_status_panel import render_job_status_panel, check_backend_with_cache, safe_api_call
 
-from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
+from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file
 from frontend.components.log_console import render_log_console, log_to_console
-from frontend.components.knowledge_graph import render_knowledge_graph
+from frontend.components.knowledge_graph import render_knowledge_graph, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
+
+from frontend.components.entity_order import render_entity_order
 
 from frontend.components.mapping_selector import render_mapping_selector
 
@@ -26,7 +28,6 @@ from frontend.api.client import submit_async_processing_task, submit_mappings_to
 
 import streamlit as st
 import streamlit_nested_layout
-from streamlit_sortables import sort_items
 from streamlit_autorefresh import st_autorefresh
 
 
@@ -132,7 +133,7 @@ def build_app():
                 # Keep only entities that still exist
                 updated_file_order = [label for label in current_file_order if label in current_entities]
                 st.session_state.file_order = updated_file_order
-                log_to_console(f"📋 Entity order updated after removal: {' → '.join(updated_file_order)}")
+                # log_to_console(f"📋 Entity order updated after removal: {' → '.join(updated_file_order)}")
                 st.rerun()
 
             # Add entity buttons
@@ -204,31 +205,22 @@ def build_app():
             # Label file upload
             st.subheader("Label")
             
-            # Label file upload with automatic cleanup when uploader is cleared
-            lup = st.file_uploader("Upload Label File", type=["csv", "tsv", "txt"], key="lbl_up", label_visibility="collapsed")
-            
-            # handle label file upload changes
-            previous_file_key = "_had_label_file"
-            previous_filename_key = "_label_filename"
-            saved_label_path = job_manager.handle_label_file_change(lup, previous_file_key, previous_filename_key)
+            # file_uploader
+            lup = st.file_uploader(
+                "Upload Label File",
+                type=["csv", "tsv", "txt"],
+                key="lbl_up",
+                label_visibility="collapsed"
+            )
 
-            if saved_label_path:
-                # Label file was uploaded
-                # Check if this is a new upload
-                if st.session_state.get("_label_file_path") != saved_label_path:
-                    st.session_state.label_path = saved_label_path
-                    st.session_state["_label_file_path"] = saved_label_path
-                    st.session_state["_label_uploaded_once"] = True
-                    log_to_console(f"🏷️ Label file saved: `{lup.name}` → `{saved_label_path}`")
-            else:
-                # Label file was cleared (automatic cleanup was already handled)
-                # Just update the session state
-                if st.session_state.get("_label_uploaded_once"):
-                    st.session_state.label_path = ""
-                    st.session_state["_label_file_path"] = ""
-                    st.session_state["_label_uploaded_once"] = False
-                    log_to_console(f"🗑️ Label file cleared")
-                    st.rerun()
+            saved_label_path = job_manager.handle_label_file_change(
+                lup,
+                previous_file_key="_had_label_file",
+                previous_filename_key="_label_filename"
+            )
+
+            st.session_state.label_path = saved_label_path
+
 
             # Next button
             btn_l, btn_r = st.columns([1, 1])
@@ -260,21 +252,6 @@ def build_app():
                             st.warning("⚠️ **Knowledge Graph Connectivity Issues:**")
                             for suggestion in connectivity_analysis["suggestions"]:
                                 st.warning(f"• {suggestion}")
-                            
-                            # auto-add missing virtual nodes
-                            if st.button("🔧 Auto-add missing virtual nodes", key="auto_add_virtual"):
-                                import uuid as uuid_module
-                                for missing_node in connectivity_analysis["missing_nodes"]:
-                                    st.session_state.entities.append(dict(
-                                        uuid=str(uuid_module.uuid4()),
-                                        fill0=True,  # Virtual node
-                                        feature_label=missing_node.lower(),  # Use lowercase label
-                                        entity_type=missing_node,
-                                        id_type="",
-                                        file_path=""
-                                    ))
-                                log_to_console(f"🔧 Auto-added virtual nodes: {', '.join(connectivity_analysis['missing_nodes'])}")
-                                st.rerun()
                         
                         if connectivity_analysis["broken_paths"]:
                             st.error("❌ **Disconnected paths found:**")
@@ -282,7 +259,7 @@ def build_app():
                                 st.error(f"• No path between {source} and {target}")
                     
                     # if entity_validation["valid"] and label_validation["valid"]:
-                    if entity_validation["valid"] and label_validation["valid"]:
+                    if entity_validation["valid"] and label_validation["valid"] and connectivity_analysis["connected"]:
                         # Generate file order (edge types are generated dynamically in Step 2)
                         st.session_state.file_order = _build_file_order(st.session_state.entities)
                         st.session_state.step1_open, st.session_state.step2_open = False, True
@@ -294,45 +271,9 @@ def build_app():
             l, r = st.columns(2)
             with l:
                 st.markdown("#### Entity Order")
-
-                # Get current file order from session state
-                current_file_order = st.session_state.get("file_order", [])
                 
-                # Get current entities to ensure file_order is in sync
-                current_entities = [ent["feature_label"] for ent in st.session_state.entities if ent.get("feature_label", "").strip()]
-                
-                # Update file_order if entities have changed
-                if set(current_file_order) != set(current_entities):
-                    # Keep existing order where possible, append new ones
-                    updated_order = [label for label in current_file_order if label in current_entities]
-                    new_entities = [label for label in current_entities if label not in updated_order]
-                    updated_order.extend(new_entities)
-                    st.session_state.file_order = updated_order
-                    current_file_order = updated_order
-                    # log_to_console(f"Entity order synced: {' → '.join(updated_order)}")
-
-                if current_file_order:
-                    st.markdown(
-                        "<span style='font-size:14px;'>Drag to reorder entities.</span>",
-                        unsafe_allow_html=True
-                    )
-                    # Use dynamic key based on entity count and names to force refresh when entities change
-                    entity_hash = hash(tuple(current_file_order))
-                    sortable_key = f"entity_order_sortable_{entity_hash}"
-                    
-                    # Use streamlit-sortables for manual reordering
-                    sorted_items = sort_items(current_file_order, key=sortable_key)
-                    
-                    # Check if the order has changed and update immediately
-                    if sorted_items != current_file_order:
-                        st.session_state.file_order = sorted_items
-                        log_to_console(f"📋 Entity order updated: {' → '.join(sorted_items)}")
-                        st.rerun()
-                    
-                    # Display current order
-                    st.caption(f"Current order:\n{' → '.join(current_file_order)}")
-                else:
-                    st.info("Entity order will be generated automatically based on your selected entities.")
+                # Render entity order
+                latest_order = render_entity_order(st.session_state.entities)
 
                 # Z-score normalization checkbox
                 st.checkbox("Apply Z-score", key="zscore_check")

@@ -7,7 +7,6 @@ from typing import Dict, Any
 
 
 class TempManager:
-    """Temp manager with job_id support and no Streamlit dependency."""
 
     def __init__(self, base_dir: str = "temp"):
         self.temp_root = Path(base_dir)
