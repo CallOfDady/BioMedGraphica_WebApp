@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 import os
 import requests
 
+load_dotenv()
+
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 def submit_async_processing_task(payload: dict) -> str:
