@@ -466,6 +466,20 @@ def build_app():
                         # Provide download options
                         col1, col2 = st.columns(2)
                         with col1:
+                            with st.expander("💡 How to choose download location"):
+                                st.markdown("""
+                                **Method 1: Right-click download**
+                                - Right-click the download button
+                                - Select "Save link as..." or "Save target as..."
+                                - Choose your desired location
+                                
+                                **Method 2: Change browser settings**
+                                - Chrome: Settings → Advanced → Downloads → Change location
+                                - Firefox: Settings → General → Downloads → Choose folder
+                                - Edge: Settings → Downloads → Change location
+                                """)
+                        # Download button
+                        with col2:
                             st.markdown(f"""
                             <a href="{download_url}" target="_blank" style="
                                 display: inline-block;
@@ -480,21 +494,6 @@ def build_app():
                                 box-sizing: border-box;
                             ">📥 Download Result</a>
                             """, unsafe_allow_html=True)
-                        
-                        with col2:
-                            with st.expander("💡 How to choose download location"):
-                                st.markdown("""
-                                **Method 1: Right-click download**
-                                - Right-click the download button
-                                - Select "Save link as..." or "Save target as..."
-                                - Choose your desired location
-                                
-                                **Method 2: Change browser settings**
-                                - Chrome: Settings → Advanced → Downloads → Change location
-                                - Firefox: Settings → General → Downloads → Choose folder
-                                - Edge: Settings → Downloads → Change location
-                                """)
-                        
                         del st.session_state.submitted_task_id
 
                     elif status.get("status") == "FAILURE":
