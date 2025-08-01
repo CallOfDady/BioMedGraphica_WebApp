@@ -8,3 +8,5 @@ streamlit_autorefresh
 redis
 transformers
 scikit-learn
+pyvis
+python-dotenv

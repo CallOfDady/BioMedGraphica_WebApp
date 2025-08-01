@@ -1,6 +1,10 @@
+# frontend/api/client.py
+
+from dotenv import load_dotenv
+import os
 import requests
 
-BACKEND_URL = "http://localhost:8000"
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 
 def submit_async_processing_task(payload: dict) -> str:
     """

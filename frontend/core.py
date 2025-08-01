@@ -23,7 +23,7 @@ from frontend.components.entity_order import render_entity_order
 
 from frontend.components.mapping_selector import render_mapping_selector
 
-from frontend.api.client import submit_async_processing_task, submit_mappings_to_backend, check_task_status
+from frontend.api.client import submit_async_processing_task, submit_mappings_to_backend, check_task_status, download_results
 
 import streamlit as st
 import streamlit_nested_layout
@@ -461,7 +461,7 @@ def build_app():
                         st.success("🎉 Processing completed!")
                         
                         # Create download URL
-                        download_url = f"http://localhost:8000/api/download/{task_id}"
+                        download_url = safe_api_call(download_results, task_id)
                         
                         # Provide download options
                         col1, col2 = st.columns(2)

@@ -1,12 +1,15 @@
 # backend/config.py
+from dotenv import load_dotenv
 import os
 from pathlib import Path
+
+load_dotenv()
 
 class Config:
     # Get database path from environment variable or use default
     DATABASE_PATH = os.getenv(
         "BIOMEDGRAPHICA_DB_PATH", 
-        "E:/LabWork/BioMedGraphica-Conn"
+        "../BioMedGraphica-Conn"
     )
     
     @classmethod
