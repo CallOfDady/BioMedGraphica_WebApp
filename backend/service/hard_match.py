@@ -1,17 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
-
-def _load_bmg_csv(database_path, entity_type):
-    path = os.path.join(
-        database_path,
-        "Entity",
-        entity_type,
-        f"BioMedGraphica_Conn_{entity_type}.csv",
-    )
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Mapping file not found: {path}")
-    return pd.read_csv(path)
+from backend.utils.io import _load_bmg_csv, save_name_and_desc
 
 def process_entity_hard_match(entity_type, id_type, file_path, feature_label, database_path, fill0=False, sample_ids=None, output_dir="cache"):
     entity_type = entity_type.capitalize()
@@ -36,6 +26,14 @@ def process_entity_hard_match(entity_type, id_type, file_path, feature_label, da
             "Original_ID": ["" for _ in bmg_ids],
         })
         mapping_df.to_csv(os.path.join(output_dir, "raw_id_mapping", f"{feature_label.lower()}_id_map.csv"), index=False)
+
+        save_name_and_desc(
+            database_path,
+            entity_type,
+            output_dir,
+            feature_label
+        )
+
         return {"feature_label": feature_label, "status": "success"}
 
     sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
@@ -88,4 +86,12 @@ def process_entity_hard_match(entity_type, id_type, file_path, feature_label, da
     ).fillna({"Original_ID": ""})
 
     final_mapping_df.to_csv(os.path.join(output_dir, "raw_id_mapping", f"{feature_label.lower()}_id_map.csv"), index=False)
+
+    save_name_and_desc(
+        database_path,
+        entity_type,
+        output_dir,
+        feature_label
+    )
+
     return {"feature_label": feature_label, "status": "success"}

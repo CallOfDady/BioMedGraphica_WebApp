@@ -3,7 +3,7 @@ from backend.service.embedding_matcher import EntityMatcher
 
 matcher = None  # Global singleton
 
-def load_matcher(device: str = "cuda"):
+def load_matcher(device: str = "cpu"):
     """Load and return a singleton matcher"""
     global matcher
     if matcher is None:

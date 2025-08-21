@@ -5,6 +5,7 @@ import time
 import redis
 import json
 import pandas as pd
+import torch
 
 r = redis.Redis(decode_responses=True)
 
@@ -52,3 +53,72 @@ def load_mappings_from_redis(job_id: str) -> list[dict]:
         raise ValueError(f"Redis data for job_id {job_id} is not valid JSON")
     except Exception as e:
         raise ValueError(f"Unexpected error parsing mappings for job_id {job_id}: {e}")
+
+def _load_bmg_csv(database_path, entity_type):
+    path = os.path.join(
+        database_path,
+        "Entity",
+        entity_type,
+        f"BioMedGraphica_Conn_{entity_type}.csv",
+    )
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Mapping file not found: {path}")
+    return pd.read_csv(path)
+
+def _load_bmg_embeddings(database_path, entity_type):
+    path = os.path.join(
+        database_path,
+        "Embed",
+        entity_type,
+        f"{entity_type}_Embeddings.pt",
+    )
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Embedding file not found: {path}")
+    return torch.load(path, map_location=torch.device('cpu'))
+
+def _load_bmg_name_csv(database_path, entity_type):
+    path = os.path.join(
+        database_path,
+        "Entity",
+        entity_type,
+        f"BioMedGraphica_Conn_{entity_type}_LLM_Name_ID_Combined.csv",
+    )
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Mapping file not found: {path}")
+    return pd.read_csv(path)
+
+def _load_bmg_desc_csv(database_path, entity_type):
+    path = os.path.join(
+        database_path,
+        "Entity",
+        entity_type,
+        f"BioMedGraphica_Conn_{entity_type}_Description_Combined.csv",
+    )
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Mapping file not found: {path}")
+    return pd.read_csv(path)
+
+def save_name_and_desc(database_path, entity_type, output_dir, feature_label):
+    # Save entity name if available
+    try:
+        name_df = _load_bmg_name_csv(database_path, entity_type)
+        if "BioMedGraphica_Conn_ID" in name_df.columns and "Names_and_IDs" in name_df.columns:
+            name_df = name_df[["BioMedGraphica_Conn_ID", "Names_and_IDs"]]
+            name_df.to_csv(
+                os.path.join(output_dir, "_x", f"{feature_label.lower()}_name.csv"),
+                index=False
+            )
+    except FileNotFoundError as e:
+        print(f"[WARN] {entity_type} Name file not found: {e}")
+
+    # Save entity description if available
+    try:
+        desc_df = _load_bmg_desc_csv(database_path, entity_type)
+        if "BioMedGraphica_Conn_ID" in desc_df.columns and "Description" in desc_df.columns:
+            desc_df = desc_df[["BioMedGraphica_Conn_ID", "Description"]]
+            desc_df.to_csv(
+                os.path.join(output_dir, "_x", f"{feature_label.lower()}_desc.csv"),
+                index=False
+            )
+    except FileNotFoundError as e:
+        print(f"[WARN] {entity_type} Description file not found: {e}")

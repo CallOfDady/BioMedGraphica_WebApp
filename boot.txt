@@ -11,3 +11,8 @@ celery -A backend.celery_worker worker --loglevel=info --pool=solo
 # Streamlit
 
 streamlit run app.py
+
+# For [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+
+net stop hns
+net start hns

@@ -1,22 +1,10 @@
 import os
 import pandas as pd
 import numpy as np
-import torch
 import json
 
 from backend.service.matcher_loader import load_matcher
-
-def _load_bmg_embeddings(database_path, entity_type):
-    path = os.path.join(
-        database_path,
-        "Embed",
-        entity_type,
-        f"{entity_type}_Embeddings.pt",
-    )
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Embedding file not found: {path}")
-    return torch.load(path, map_location=torch.device('cpu'))
-
+from backend.utils.io import _load_bmg_embeddings, save_name_and_desc
 
 def generate_soft_match_candidates(
     entity_type,
@@ -139,6 +127,13 @@ def apply_soft_match_selection(
 
     expr = expr.reindex(index=sample_ids, columns=bmg_ids, fill_value=0)
     np.save(os.path.join(output_dir, "_x", f"{feature_label.lower()}.npy"), expr.values)
+
+    save_name_and_desc(
+        database_path,
+        entity_type,
+        output_dir,
+        feature_label
+    )
 
     return {
         "feature_label": feature_label,

@@ -125,6 +125,55 @@ def process_edge_data_with_selected_types(filtered_edge_data, selected_types, en
     # Save the filtered edge data with BioMedGraphica_Conn_ID
     filtered_edge_data.to_csv(os.path.join(processed_data_path, 'filtered_edge_id_index_data.csv'), index=False)
 
+def generate_name_and_desc_csvs(cache_dir, file_order, out_dir):
+    """Generate concatenated name and description CSVs from individual files."""
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    name_frames = []
+    desc_frames = []
+
+    for file_name in file_order:
+        # name
+        name_path = os.path.join(cache_dir, "_x", f"{file_name}_name.csv")
+        if os.path.exists(name_path):
+            df = pd.read_csv(name_path)
+            if "BioMedGraphica_Conn_ID" in df.columns and "Names_and_IDs" in df.columns:
+                name_frames.append(df[["BioMedGraphica_Conn_ID", "Names_and_IDs"]])
+            else:
+                print(f"Warning: {name_path} missing required columns ['BioMedGraphica_Conn_ID','Names_and_IDs']. Found: {list(df.columns)}")
+        else:
+            print(f"Warning: {name_path} not found.")
+
+        # desc
+        desc_path = os.path.join(cache_dir, "_x", f"{file_name}_desc.csv")
+        if os.path.exists(desc_path):
+            df = pd.read_csv(desc_path)
+            if "BioMedGraphica_Conn_ID" in df.columns and "Description" in df.columns:
+                desc_frames.append(df[["BioMedGraphica_Conn_ID", "Description"]])
+            else:
+                print(f"Warning: {desc_path} missing required columns ['BioMedGraphica_Conn_ID','Description']. Found: {list(df.columns)}")
+        else:
+            print(f"Warning: {desc_path} not found.")
+
+    # Concatenate and save name and description dataframes
+    if len(name_frames) > 0:
+        s_name = pd.concat(name_frames, ignore_index=True)
+        s_name_path = os.path.join(out_dir, "s_name.csv")
+        s_name.to_csv(s_name_path, index=False)
+        print(f"Saved: {s_name_path}")
+    else:
+        print("No name CSVs were found to concatenate.")
+
+    if len(desc_frames) > 0:
+        s_desc = pd.concat(desc_frames, ignore_index=True)
+        s_desc_path = os.path.join(out_dir, "s_desc.csv")
+        s_desc.to_csv(s_desc_path, index=False)
+        print(f"Saved: {s_desc_path}")
+    else:
+        print("No desc CSVs were found to concatenate.")
+
+
 
 def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore=False):
 
@@ -147,6 +196,8 @@ def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore
         mapping_df,
         out_dir,
     )
+
+    generate_name_and_desc_csvs(cache_dir, file_order, out_dir)
 
     return {
         "status": "success",
