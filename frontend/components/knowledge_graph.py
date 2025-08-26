@@ -191,29 +191,27 @@ def render_knowledge_graph(job_manager):
     components.html(html_content, height=550, scrolling=True)
     
     # Display legend and status information
-    if missing_nodes:
+    if selected_entities and not missing_nodes:
+        st.markdown("✅ **All selected entities are connected**")
+    elif missing_nodes:
         st.markdown("**🔍 Graph Analysis:**")
-        if missing_nodes:
-            st.markdown(f"🔴 **Missing nodes for connectivity:** {', '.join(missing_nodes)}")
-            
-            # Quick add missing nodes button
-            if st.button("🔧 Quick add missing nodes", key="quick_add_missing"):
-                import uuid
-                for missing_node in missing_nodes:
-                    st.session_state.entities.append(dict(
-                        uuid=str(uuid.uuid4()),
-                        fill0=True,  # Virtual node
-                        feature_label=missing_node.lower(),  # Use lowercase label
-                        entity_type=missing_node,
-                        id_type="",
-                        file_path=""
-                    ))
-                from .entity_row import log_to_console
-                log_to_console(f"🔧 Quick-added missing virtual nodes: {', '.join(missing_nodes)}")
-                st.rerun()
-                
-        if selected_entities:
-            st.markdown("✅ **All selected entities are connected**")
+        st.markdown(f"🔴 **Missing nodes for connectivity:** {', '.join(missing_nodes)}")
+        
+        # Quick add missing nodes button
+        if st.button("🔧 Quick add missing nodes", key="quick_add_missing"):
+            import uuid
+            for missing_node in missing_nodes:
+                st.session_state.entities.append(dict(
+                    uuid=str(uuid.uuid4()),
+                    fill0=True,  # Virtual node
+                    feature_label=missing_node.lower(),  # Use lowercase label
+                    entity_type=missing_node,
+                    id_type="",
+                    file_path=""
+                ))
+            from .entity_row import log_to_console
+            log_to_console(f"🔧 Quick-added missing virtual nodes: {', '.join(missing_nodes)}")
+            st.rerun()
 
 def analyze_knowledge_graph_connectivity(
     entities: list,
