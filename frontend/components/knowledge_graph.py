@@ -188,7 +188,7 @@ def render_knowledge_graph(job_manager):
     # Insert before last </script>
     html_content = html_content.replace("</script>", injected_code + "\n</script>")
 
-    components.html(html_content, height=550, scrolling=True)
+    components.html(html_content, height=600, scrolling=True)
     
     # Display legend and status information
     if selected_entities and not missing_nodes:

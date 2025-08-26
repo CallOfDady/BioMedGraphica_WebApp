@@ -108,7 +108,7 @@ def build_app():
     st.divider()
 
     # Two main columns for the app
-    main_left, main_right = st.columns([5, 4], gap="large")
+    main_left, main_right = st.columns([4, 3], gap="large")
 
     with main_left:
 
