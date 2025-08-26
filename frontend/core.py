@@ -251,11 +251,6 @@ def build_app():
                             st.warning("⚠️ **Knowledge Graph Connectivity Issues:**")
                             for suggestion in connectivity_analysis["suggestions"]:
                                 st.warning(f"• {suggestion}")
-                        
-                        if connectivity_analysis["broken_paths"]:
-                            st.error("❌ **Disconnected paths found:**")
-                            for source, target in connectivity_analysis["broken_paths"]:
-                                st.error(f"• No path between {source} and {target}")
                     
                     # if entity_validation["valid"] and label_validation["valid"]:
                     if entity_validation["valid"] and label_validation["valid"] and connectivity_analysis["connected"]:

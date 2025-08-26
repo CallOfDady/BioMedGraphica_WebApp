@@ -24,8 +24,7 @@ def render_knowledge_graph(job_manager):
     connectivity_analysis = analyze_knowledge_graph_connectivity(st.session_state.get("entities", []))
     
     missing_nodes = connectivity_analysis.get("missing_nodes", [])
-    broken_paths = connectivity_analysis.get("broken_paths", [])
-    path_edges = connectivity_analysis.get("path_edges", [])
+    edges_on_paths = connectivity_analysis.get("edges_on_paths", [])
 
     # Create a directed graph
     G = nx.DiGraph()
@@ -74,45 +73,36 @@ def render_knowledge_graph(job_manager):
 
     # Add edges with highlighting
     for src, dst in G.edges():
-        # Check if this edge is part of a broken path
-        is_broken_edge = False
-        for broken_src, broken_dst in broken_paths:
-            if (src == broken_src and dst == broken_dst) or (src == broken_dst and dst == broken_src):
-                is_broken_edge = True
-                break
-        
-        # Check if this edge is part of the connectivity path
-        is_path_edge = (src, dst) in path_edges or (dst, src) in path_edges
-        
-        # Check if this edge connects selected nodes directly
+        # This edge is part of at least one chosen path (either direction)
+        is_path_edge = (src, dst) in edges_on_paths or (dst, src) in edges_on_paths
+
+        # The edge directly connects two user-selected nodes
         connects_selected = src in selected_entities and dst in selected_entities
-        
-        # Color logic:
-        # - Red: only for path edges that involve missing nodes or broken paths
-        # - Black: edges that connect selected nodes directly
-        # - Gray: normal edges
-        if is_broken_edge:
-            edge_color = error_color  # red for broken edges
+
+        # At least one endpoint of this edge is currently missing (virtual-needed)
+        edge_involves_missing = (src in missing_nodes) or (dst in missing_nodes)
+
+        if is_path_edge and edge_involves_missing:
+             # On a chosen path AND touches a missing node → highlight as an unresolved requirement
+            edge_color = error_color
             edge_width = 2
-        elif is_path_edge and missing_nodes:
-            # Only color red if it's a path edge AND there are missing nodes
-            edge_involves_missing = src in missing_nodes or dst in missing_nodes
-            if edge_involves_missing:
-                edge_color = error_color  # red for path edges involving missing nodes
-                edge_width = 2
-            elif connects_selected:
-                edge_color = selected_color  # black for selected connections
-                edge_width = 3
-            else:
-                edge_color = "#888"  # gray for normal edges
-                edge_width = 1
-        elif connects_selected:
-            edge_color = selected_color  # black for selected connections
+        elif is_path_edge and connects_selected:
+             # On a chosen path AND both endpoints are selected → emphasize the confirmed connection
+            edge_color = selected_color # Black
             edge_width = 3
-        else:
-            edge_color = "#888"  # gray for normal edges
+        elif connects_selected:
+            # Not on a chosen path but directly connects two selected nodes
+            edge_color = selected_color # Black
+            edge_width = 3
+        elif is_path_edge:
+            # On a chosen path but does not touch a missing node and is not a selected-to-selected edge
+            edge_color = "#888" # Gray
             edge_width = 1
-            
+        else:
+            # Others
+            edge_color = "#888" # Gray
+            edge_width = 1
+
         net.add_edge(
             src,
             dst,
@@ -201,7 +191,7 @@ def render_knowledge_graph(job_manager):
     components.html(html_content, height=550, scrolling=True)
     
     # Display legend and status information
-    if missing_nodes or broken_paths:
+    if missing_nodes:
         st.markdown("**🔍 Graph Analysis:**")
         if missing_nodes:
             st.markdown(f"🔴 **Missing nodes for connectivity:** {', '.join(missing_nodes)}")
@@ -222,179 +212,167 @@ def render_knowledge_graph(job_manager):
                 log_to_console(f"🔧 Quick-added missing virtual nodes: {', '.join(missing_nodes)}")
                 st.rerun()
                 
-        if broken_paths:
-            st.markdown("🔴 **Disconnected paths:**")
-            for src, dst in broken_paths:
-                st.markdown(f"  • {src} ↔ {dst}")
-    else:
         if selected_entities:
             st.markdown("✅ **All selected entities are connected**")
 
-
-def analyze_knowledge_graph_connectivity(entities: list,
-                                         max_paths_per_pair: int = 3,
-                                         max_hops_per_path: int = 5) -> dict:
-    """
-    Analyze the connectivity of the knowledge graph based on selected entities.
-
-    """
-
-    # --- 1) selected nodes ---
+def analyze_knowledge_graph_connectivity(
+    entities: list,
+    max_hops_per_path: int = 5
+) -> dict:
+    #  User-selected entity types
     selected_types = set()
     for ent in entities:
-        if ent.get("entity_type", "").strip():
-            selected_types.add(ent.get("entity_type"))
+        t = (ent.get("entity_type") or "").strip()
+        if t:
+            selected_types.add(t)
 
-    core_pathway_nodes = {"Promoter", "Gene", "Transcript", "Protein"}
-    trigger_nodes = {"Promoter", "Gene", "Transcript"}
-    selected_trigger_nodes = selected_types.intersection(trigger_nodes)
+    core_order = ["Promoter", "Gene", "Transcript", "Protein"]
+    core_set = set(core_order)
 
-    # If no nodes are selected, return early
-    if len(selected_types) == 0:
+    if not selected_types:
         return {
             "connected": True,
             "missing_nodes": [],
-            "broken_paths": [],
             "suggestions": [],
-            "path_edges": [],
+            "edges_on_paths": [],
             "path_options": []
         }
 
-    # If only one non-core pathway nodes are selected, return early
-    if len(selected_types) == 1 and not selected_trigger_nodes:
-        return {
-            "connected": True,
-            "missing_nodes": [],
-            "broken_paths": [],
-            "suggestions": [],
-            "path_edges": [],
-            "path_options": []
-        }
-
-    # --- 2) Construct & Weight ---
+    # Construct undirected graph
     G = nx.DiGraph()
     G.add_edges_from(EDGES)
     UG = G.to_undirected()
 
-    core_path_edges = {
-        ("Promoter", "Gene"), ("Gene", "Transcript"), ("Transcript", "Protein"),
-        ("Protein", "Pathway"), ("Protein", "Disease"), ("Protein", "Phenotype")
-    }
-    for u, v in UG.edges():
-        if (u, v) in core_path_edges or (v, u) in core_path_edges:
-            UG[u][v]['weight'] = 1
-        else:
-            UG[u][v]['weight'] = 2
+    missing_nodes: list[str] = []
+    suggestions: list[str] = []
+    edges_on_paths: set[tuple[str, str]] = set()
+    path_options: list[dict] = []
 
-    # --- 3) Results Container ---
-    missing_nodes = []
-    suggestions = []
-    path_edges = set()
-    path_options = []
-
-    # Core pathway
-    if selected_trigger_nodes:
-        core_path_order = ["Promoter", "Gene", "Transcript", "Protein"]
-        selected_indices = [core_path_order.index(n)
-                            for n in selected_trigger_nodes if n in core_path_order]
-
-        if "Protein" not in selected_types:
-            if "Protein" not in missing_nodes:
-                missing_nodes.append("Protein")
-                suggestions.append("Add 'Protein' as virtual node (required for core pathway)")
-
-        if selected_indices:
-            min_index = min(selected_indices)
-            protein_index = core_path_order.index("Protein")
-            for i in range(min_index, protein_index):
-                node = core_path_order[i]
-                if node not in selected_types and node not in missing_nodes:
-                    missing_nodes.append(node)
-                    suggestions.append(f"Add '{node}' as virtual node (required for core pathway)")
-
-    endpoints_for_pairs = list(selected_types)
-
-    # Helper: Add edges from path to visualization set
-    def _add_edges_from_path(path_seq):
+    def add_edges_on_paths(path_seq: list[str]):
         for k in range(len(path_seq) - 1):
-            e = (path_seq[k], path_seq[k + 1])
-            if e in EDGES:
-                path_edges.add(e)
-            elif (e[1], e[0]) in EDGES:
-                path_edges.add((e[1], e[0]))
+            u, v = path_seq[k], path_seq[k + 1]
+            if (u, v) in EDGES:
+                edges_on_paths.add((u, v))
+            elif (v, u) in EDGES:
+                edges_on_paths.add((v, u))
 
-    # --- 4) Pair Level: Collect Candidate Paths & Provide Missing Suggestions ---
-    for i in range(len(endpoints_for_pairs)):
-        for j in range(i + 1, len(endpoints_for_pairs)):
-            source = endpoints_for_pairs[i]
-            target = endpoints_for_pairs[j]
-
-            candidate_paths = []
-            try:
-                gen = nx.shortest_simple_paths(UG, source, target, weight='weight')
-                count = 0
-                for path in gen:
-                    if len(path) - 1 > max_hops_per_path:
-                        continue
-                    missing_for_path = [n for n in path if n not in selected_types]
-                    candidate_paths.append({
-                        "pair": (source, target),
-                        "path": path,
-                        "missing_nodes": missing_for_path
-                    })
-                    _add_edges_from_path(path)
-                    count += 1
-                    if count >= max_paths_per_pair:
-                        break
-            except (nx.NodeNotFound, nx.NetworkXNoPath):
-
-                candidate_paths = []
-
-            # Add candidate paths to options
-            path_options.extend(candidate_paths)
-
-            # If there is at least one complete path that does not require new nodes, no missing suggestions are needed
-            if candidate_paths and any(len(p["missing_nodes"]) == 0 for p in candidate_paths):
-                continue
-
-            # Otherwise, suggest adding the least missing nodes from the candidate paths
-            if candidate_paths:
-                best_path = min(candidate_paths, key=lambda p: len(p["missing_nodes"]))
-                for node in best_path["missing_nodes"]:
-                    if node not in selected_types and node not in missing_nodes:
-                        missing_nodes.append(node)
-                        suggestions.append(f"Add '{node}' as virtual node to connect {source} and {target}")
-
-    # --- 5) Component Level: Unified Judgment of "Broken Paths" ---
-    broken_paths = []
-    selected_in_graph = [n for n in selected_types if n in UG]
-
-    if selected_in_graph:
-        anchor = selected_in_graph[0]
+    def all_shortest_paths_bound(src: str, dst: str) -> list[list[str]]:
+        """Return all shortest paths within hop bound; empty list if none."""
         try:
-            component = nx.node_connected_component(UG, anchor)
-        except nx.NetworkXError:
-            component = set()
+            p = nx.shortest_path(UG, src, dst)
+            L = len(p) - 1
+            if L > max_hops_per_path:
+                return []
+            return [path for path in nx.all_shortest_paths(UG, src, dst) if len(path) - 1 == L]
+        except (nx.NodeNotFound, nx.NetworkXNoPath):
+            return []
+        
+    def has_direct_edge(u: str, v: str) -> bool:
+        """Check if there is a direct (undirected) edge between u and v in EDGES."""
+        return (u, v) in EDGES or (v, u) in EDGES
 
-        disconnected = [n for n in selected_in_graph if n not in component]
-        # If there are disconnected nodes, treat them as broken paths
-        broken_paths = [(anchor, n) for n in disconnected]
+    def core_segment_from(cn: str) -> list[str]:
+        """Return the core segment from core node `cn` to Protein, inclusive."""
+        i = core_order.index(cn)
+        j = core_order.index("Protein")
+        return core_order[i:j+1] if i <= j else [cn]
 
-    # If all selected nodes are not in the graph (extreme case), treat them as all broken
-    elif selected_types:
-        sel_list = list(selected_types)
-        anchor = sel_list[0]
-        broken_paths = [(anchor, n) for n in sel_list[1:]]
+    # core bone auto-fill
+    selected_core = list(selected_types.intersection(core_set))
+    core_autofill_set: set[str] = set()
+    if selected_core:
+        idxs = [core_order.index(n) for n in selected_core]
+        start_idx = min(idxs)
+        protein_idx = core_order.index("Protein")
+        core_path = core_order[start_idx:protein_idx + 1] if start_idx <= protein_idx else [core_order[start_idx]]
 
-    # --- 6) Overall Connectivity ---
-    connected = len(missing_nodes) == 0 and len(broken_paths) == 0
+        core_autofill_set = set(core_path)
 
+        # Mark missing core nodes, force fill
+        for n in core_path:
+            if n not in selected_types and n not in missing_nodes:
+                missing_nodes.append(n)
+                suggestions.append(f"Add '{n}' as virtual node (required by core pathway)")
+        # Highlight core edges
+        for k in range(len(core_path) - 1):
+            u, v = core_path[k], core_path[k + 1]
+            if (u, v) in EDGES or (v, u) in EDGES:
+                edges_on_paths.add((u, v) if (u, v) in EDGES else (v, u))
+
+    # Process non-core node pairs
+    def process_pair(src: str, dst: str):
+        if selected_core:
+            # core_path is already defined, try to connect via core
+            for cn in core_path:
+                if has_direct_edge(dst, cn):
+                    # Path：dst → cn → ... → Protein
+                    segment = core_segment_from(cn)          # [cn, ..., Protein]
+                    combined = [dst] + segment
+                    # Highlight edges
+                    add_edges_on_paths(combined)
+                    path_options.append({
+                        "pair": (src, dst),
+                        "path": combined,
+                        "missing_nodes": [n for n in combined if n not in selected_types]
+                    })
+                    return
+
+        # Get all shortest paths
+        cands = all_shortest_paths_bound(src, dst)
+        if not cands:
+            return  # Should not happen as it's fully connected graph
+
+        # Check missing nodes on each path (excluding selected and core autofill)
+        per_path_missing = []
+        for path in cands:
+            miss = [n for n in path if n not in selected_types and n not in core_autofill_set]
+            per_path_missing.append(set(miss))
+
+        # Add edges and path options
+        for path in cands:
+            add_edges_on_paths(path)
+            path_options.append({
+                "pair": (src, dst),
+                "path": path,
+                "missing_nodes": [n for n in path if n not in selected_types]
+            })
+
+        # If there exists a "zero-missing" shortest path → already connected: do not add new missing
+        if any(len(miss) == 0 for miss in per_path_missing):
+            return
+
+        # Otherwise: highlight the all missing nodes that appeared in the shortest paths
+        needed_union = set().union(*per_path_missing) if per_path_missing else set()
+        for n in sorted(needed_union):
+            if n not in missing_nodes:
+                missing_nodes.append(n)
+        if needed_union:
+            choices = ", ".join(sorted(needed_union))
+            suggestions.append(
+                f"Add one of {{{choices}}} to connect {src} and {dst} via a shortest path"
+            )
+
+    if selected_core:
+        # Non-core nodes only connect to Protein
+        anchor = "Protein"
+        for target in [n for n in selected_types if n not in core_set]:
+            if target == anchor:
+                continue
+            process_pair(anchor, target)
+    else:
+        # No core: pairwise processing
+        endpoints = list(selected_types)
+        for i in range(len(endpoints)):
+            for j in range(i + 1, len(endpoints)):
+                process_pair(endpoints[i], endpoints[j])
+
+    # Final connectivity status
+    connected = len(missing_nodes) == 0
     return {
         "connected": connected,
         "missing_nodes": missing_nodes,
-        "broken_paths": broken_paths,
         "suggestions": suggestions,
-        "path_edges": list(path_edges),
+        "edges_on_paths": list(edges_on_paths),
         "path_options": path_options
     }
 
