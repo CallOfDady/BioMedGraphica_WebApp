@@ -326,24 +326,40 @@ def analyze_knowledge_graph_connectivity(
             miss = [n for n in path if n not in selected_types and n not in core_autofill_set]
             per_path_missing.append(set(miss))
 
-        # Add edges and path options
-        for path in cands:
+        # Pair paths with their missing nodes
+        cands_with_missing = list(zip(cands, per_path_missing))
+
+        # If any path has 0 missing, take all such paths
+        zero_missing_paths = [p for p, miss in cands_with_missing if len(miss) == 0]
+        if zero_missing_paths:
+            for path in zero_missing_paths:
+                add_edges_on_paths(path)
+                path_options.append({
+                    "pair": (src, dst),
+                    "path": path,
+                    "missing_nodes": []  # 0 missing
+                })
+            return
+
+        # Otherwise: only keep the paths with the minimum number of missing nodes Π*
+        min_k = min(len(miss) for _, miss in cands_with_missing)
+        pi_star = [(p, miss) for p, miss in cands_with_missing if len(miss) == min_k]
+
+        # Show Π*, and take the union of their missing nodes as missing_nodes
+        needed_union = set().union(*(miss for _, miss in pi_star)) if pi_star else set()
+
+        for path, miss in pi_star:
             add_edges_on_paths(path)
             path_options.append({
                 "pair": (src, dst),
                 "path": path,
-                "missing_nodes": [n for n in path if n not in selected_types]
+                "missing_nodes": sorted(miss)
             })
 
-        # If there exists a "zero-missing" shortest path → already connected: do not add new missing
-        if any(len(miss) == 0 for miss in per_path_missing):
-            return
-
-        # Otherwise: highlight the all missing nodes that appeared in the shortest paths
-        needed_union = set().union(*per_path_missing) if per_path_missing else set()
         for n in sorted(needed_union):
             if n not in missing_nodes:
                 missing_nodes.append(n)
+
         if needed_union:
             choices = ", ".join(sorted(needed_union))
             suggestions.append(
