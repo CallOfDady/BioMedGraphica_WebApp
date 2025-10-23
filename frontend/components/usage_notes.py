@@ -9,7 +9,7 @@ def render_usage_notes():
     st.subheader("🧭 Usage Notes")
 
     st.markdown("""
-    1. **Prepare Data or [Download Example Data (TCGA-BRCA)](https://drive.usercontent.google.com/download?id=1yVaNNgtq-w6BsdXI47MRr20HC8vEERkx&export=download)**
+    1. **Prepare Data or [Download Example Data (TCGA-BRCA)](https://drive.usercontent.google.com/download?id=1O-5bRrOb1Yf7v1Jy8YpsmP6ltDUglFps&export=download)**
        
        - Before starting, ensure you have the necessary feature files (multi-omics datasets) and a sample label file.
        - To quickly explore the workflow or to use as a reference for data preparation, you can refer to the provided **TCGA-BRCA example dataset** (30 MB).
