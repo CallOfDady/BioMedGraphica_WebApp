@@ -185,10 +185,21 @@ def render_knowledge_graph(job_manager):
     });
     """
 
+    html_content = html_content.replace(
+        "<head>",
+        "<head><style>"
+        ".card{border:none!important; box-shadow:none!important; background:transparent!important;}"
+        ".card-body{border:none!important; box-shadow:none!important; background:transparent!important; padding:0!important;}"
+        "#mynetwork{border:none!important; outline:none!important;}"
+        ".vis-network, .vis-network * {border:none!important; outline:none!important; box-shadow:none!important;}"
+        "html,body{margin:0;padding:0;}"
+        "</style>"
+    )
+
     # Insert before last </script>
     html_content = html_content.replace("</script>", injected_code + "\n</script>")
 
-    components.html(html_content, height=600, scrolling=True)
+    components.html(html_content, height=500, scrolling=False)
     
     # Display legend and status information
     if selected_entities and not missing_nodes:

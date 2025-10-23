@@ -16,7 +16,8 @@ from frontend.init_job_manager import initialize_job_manager
 from frontend.components.job_status_panel import render_job_status_panel, safe_api_call
 
 from frontend.components.entity_row import render_entity_row, validate_entities, check_label_file
-from frontend.components.log_console import render_log_console, log_to_console
+# from frontend.components.log_console import render_log_console, log_to_console
+from frontend.components.usage_notes import render_usage_notes
 from frontend.components.knowledge_graph import render_knowledge_graph, analyze_knowledge_graph_connectivity, generate_edge_types_from_entities
 
 from frontend.components.entity_order import render_entity_order
@@ -60,28 +61,15 @@ def _generate_default_entity_order(entities):
 def _build_file_order(entities):
     return _generate_default_entity_order(entities)
 
-def log_to_console(message: str):
-    logs = st.session_state.get("log_messages", [])
-    logs.append(message)
-    st.session_state["log_messages"] = logs
-
 # --------------------------- MAIN BUILDER --------------------------------
 
 def build_app():
 
     # ---------- UI ----------
     st.set_page_config(f"BiomedGraphica Integration", layout="wide")
-    st.title("🧬 BiomedGraphica – Data Integration")
+    # st.title("🧬 BiomedGraphica – Data Integration")
+    st.image("assets/bmg_logo.png", width=800)
 
-    # ---------- Project Header ----------
-    st.markdown("""
-    **BioMedGraphica Data Integration App** is a Web-based GUI tool that enables researchers to convert biomedical data into structured graph-ready format for **AI in Precision Health and Medicine**.
-
-    - Upload and align **multi-omics and clinical datasets**
-    - Perform **entity recognition** via hard or soft matching
-    - Construct **custom knowledge-signaling graphs**
-    - Export **graph-ready `.npy` files** for downstream modeling
-    """)
     # ---------- App Initialization ----------
     # Init job manager
     job_manager, job_id, job_data_output_dir = initialize_job_manager()
@@ -148,7 +136,7 @@ def build_app():
                         id_type=get_display_ids_for_entity("")[0],
                         file_path=""
                     ))
-                    log_to_console("📋 Added new entity row")
+                    # log_to_console("📋 Added new entity row")
                     st.rerun()
             
             with btn_col2:
@@ -167,7 +155,7 @@ def build_app():
                                 id_type="",
                                 file_path=""
                             ))
-                        log_to_console(f"🔧 Added missing virtual nodes: {', '.join(missing_nodes)}")
+                        # log_to_console(f"🔧 Added missing virtual nodes: {', '.join(missing_nodes)}")
                         st.rerun()
                     else:
                         st.info("No missing nodes needed for connectivity")
@@ -194,7 +182,7 @@ def build_app():
                                 id_type="",
                                 file_path=""
                             ))
-                        log_to_console(f"🔗 Added all supporting entities as virtual nodes to construct the full connectivity graph: {', '.join(missing_entity_types)}")
+                        # log_to_console(f"🔗 Added all supporting entities as virtual nodes to construct the full connectivity graph: {', '.join(missing_entity_types)}")
                         st.rerun()
                     else:
                         st.info("All entity types are already present")
@@ -257,7 +245,7 @@ def build_app():
                         # Generate file order (edge types are generated dynamically in Step 2)
                         st.session_state.file_order = _build_file_order(st.session_state.entities)
                         st.session_state.step1_open, st.session_state.step2_open = False, True
-                        log_to_console("✅ Validation passed. Proceeding to Step 2.")
+                        # log_to_console("✅ Validation passed. Proceeding to Step 2.")
                         st.rerun()
 
         # -------- Step 2 --------
@@ -275,7 +263,7 @@ def build_app():
                 z_now = st.session_state["zscore_check"]
                 if z_before is not None and z_before != z_now:
                     status = "enabled" if z_now else "disabled"
-                    log_to_console(f"⚙️ Z-score normalization {status}.")
+                    # log_to_console(f"⚙️ Z-score normalization {status}.")
                 st.session_state["_last_zscore_val"] = z_now
                 st.session_state.apply_zscore = z_now  # store in session state
 
@@ -510,7 +498,8 @@ def build_app():
         st.divider()
 
         # Status info box
-        render_log_console()
+        # render_log_console()
+        render_usage_notes()
 
     # # ---------- style tweaks ----------
 
