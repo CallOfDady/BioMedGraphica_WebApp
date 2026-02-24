@@ -87,18 +87,54 @@ def apply_soft_match_selection(
     melted = df.melt(id_vars="Sample_ID", var_name="Original_ID", value_name="value")
     used_ids = sorted(set(melted["Original_ID"]))
 
-    mapping_df = pd.DataFrame([
-        {"Original_ID": oid, "BioMedGraphica_Conn_ID": bmg_id}
-        for oid, bmg_id in user_selections.items()
-        if bmg_id
-    ])
+    # Build raw mapping based on user selections
+    mapping_df = pd.DataFrame(
+        [
+            {"Original_ID": oid, "BioMedGraphica_Conn_ID": bmg_id}
+            for oid, bmg_id in user_selections.items()
+            if bmg_id  # not None / not empty
+        ],
+        columns=["Original_ID", "BioMedGraphica_Conn_ID"],  # keep schema even when empty
+    )
 
+    # If nothing selected, still write full raw_id_mapping file and zero matrix
+    if mapping_df.empty:
+        final_mapping_df = pd.DataFrame({
+            "BioMedGraphica_Conn_ID": bmg_ids,
+            "Original_ID": [""] * len(bmg_ids)
+        })
+
+        final_mapping_df.to_csv(
+            os.path.join(output_dir, "raw_id_mapping", f"{feature_label.lower()}_id_map.csv"),
+            index=False
+        )
+
+        data_matrix = pd.DataFrame(0, index=sample_ids, columns=bmg_ids)
+        np.save(os.path.join(output_dir, "_x", f"{feature_label.lower()}.npy"), data_matrix.values)
+
+        # Optional but recommended: still save names/descriptions for consistency
+        save_name_and_desc(
+            database_path,
+            entity_type,
+            output_dir,
+            feature_label
+        )
+
+        return {
+            "feature_label": feature_label,
+            "mapped_count": 0,
+            "status": "success",
+            "message": "No mappings selected"
+        }
+
+    # Group original IDs per BMG ID
     grouped_mapping_df = (
         mapping_df.groupby("BioMedGraphica_Conn_ID")["Original_ID"]
         .apply(lambda x: ";".join(sorted(set(str(i) for i in x if pd.notna(i) and str(i).strip()))))
         .reset_index()
     )
 
+    # Ensure full list of BMG IDs included
     final_mapping_df = pd.DataFrame({"BioMedGraphica_Conn_ID": bmg_ids}).merge(
         grouped_mapping_df, on="BioMedGraphica_Conn_ID", how="left"
     ).fillna({"Original_ID": ""})

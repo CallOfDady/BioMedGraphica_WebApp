@@ -179,6 +179,8 @@ def run_soft_match_apply(ent_cfg, output_dir, job_id, confirmed_mapping, common_
         m["original_id"]: m["selected_id"]
         for m in mappings_list if m.get("original_id") is not None
     }
+    selected_count = sum(1 for v in user_selections.values() if v)
+    print(f"[run_soft:apply] {feature_label}: selected {selected_count}/{len(user_selections)} mappings")
 
     # 3. Run soft match processing
     result = apply_soft_match_selection(
