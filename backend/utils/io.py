@@ -65,16 +65,31 @@ def _load_bmg_csv(database_path, entity_type):
         raise FileNotFoundError(f"Mapping file not found: {path}")
     return pd.read_csv(path)
 
-def _load_bmg_embeddings(database_path, entity_type):
-    path = os.path.join(
-        database_path,
-        "Embed",
-        entity_type,
-        f"{entity_type}_Embeddings.pt",
+def _load_bmg_conn_ids(database_path, entity_type) -> list[str]:
+    """
+    Load full list of BioMedGraphica_Conn_ID for the given entity type.
+
+    Priority:
+    1) BioMedGraphica_Conn_{Entity}.csv
+    """
+    df = _load_bmg_csv(database_path, entity_type)
+
+    if "BioMedGraphica_Conn_ID" not in df.columns:
+        raise ValueError(
+            f"`BioMedGraphica_Conn_ID` column not found in "
+            f"BioMedGraphica_Conn_{entity_type}.csv"
+        )
+
+    ids = (
+        df["BioMedGraphica_Conn_ID"]
+        .dropna()
+        .astype(str)
+        .str.strip()
     )
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Embedding file not found: {path}")
-    return torch.load(path, map_location=torch.device('cpu'))
+    ids = [x for x in ids if x]
+
+
+    return sorted(set(ids))
 
 def _load_bmg_name_csv(database_path, entity_type):
     path = os.path.join(

@@ -4,7 +4,7 @@ import numpy as np
 import json
 
 from backend.service.matcher_loader import load_matcher
-from backend.utils.io import _load_bmg_embeddings, save_name_and_desc
+from backend.utils.io import _load_bmg_conn_ids, save_name_and_desc
 
 def generate_soft_match_candidates(
     entity_type,
@@ -12,28 +12,49 @@ def generate_soft_match_candidates(
     feature_label,
     database_path,
     topk=5,
-    output_path=None  # Optional: where to store top-k mapping as JSON
+    output_path=None,
+    matcher_index_root_dir=None,
+    matcher_device="cpu",
+    matcher_model_path="dmis-lab/biobert-base-cased-v1.2",
 ):
-    matcher = load_matcher()
     entity_type = entity_type.capitalize()
-    embeddings = _load_bmg_embeddings(database_path, entity_type)
+
+    matcher = load_matcher(
+        entity_type=entity_type,
+        index_root_dir=matcher_index_root_dir,
+        device=matcher_device,
+        model_path=matcher_model_path,
+    )
 
     sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
     df = pd.read_csv(file_path, sep=sep)
     df.rename(columns={df.columns[0]: "Sample_ID"}, inplace=True)
 
     melted = df.melt(id_vars="Sample_ID", var_name="Original_ID", value_name="value")
-    used_ids = sorted(set(melted["Original_ID"]))
+    used_ids = sorted(set(melted["Original_ID"].astype(str)))
+
+    raw_results = matcher.match_many(
+        queries=used_ids,
+        topk=topk,
+        top_alias=200,
+        method="max",
+        return_alias_hits=0,
+        enable_exact=True,
+        exact_score=1.0,
+    )
 
     mapping_data = {}
     for oid in used_ids:
-        candidates = matcher.get_topk_entities(query=oid, k=topk, embeddings=embeddings)
-        mapping_data[oid] = candidates
+        results = raw_results.get(oid, [])
+
+        mapping_data[oid] = results
 
     if output_path:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(mapping_data, f, indent=2)
+        out_dir = os.path.dirname(output_path)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(mapping_data, f, indent=2, ensure_ascii=False)
 
     return {
         "feature_label": feature_label,
@@ -52,8 +73,8 @@ def apply_soft_match_selection(
     output_dir="cache"
 ):
     entity_type = entity_type.capitalize()
-    embeddings = _load_bmg_embeddings(database_path, entity_type)
-    bmg_ids = list(embeddings.keys())
+
+    bmg_ids = _load_bmg_conn_ids(database_path, entity_type)
 
     os.makedirs(os.path.join(output_dir, "_x"), exist_ok=True)
     os.makedirs(os.path.join(output_dir, "raw_id_mapping"), exist_ok=True)
@@ -66,21 +87,18 @@ def apply_soft_match_selection(
     melted = df.melt(id_vars="Sample_ID", var_name="Original_ID", value_name="value")
     used_ids = sorted(set(melted["Original_ID"]))
 
-    # Build raw mapping based on user selections
     mapping_df = pd.DataFrame([
         {"Original_ID": oid, "BioMedGraphica_Conn_ID": bmg_id}
         for oid, bmg_id in user_selections.items()
-        if bmg_id  # not None
+        if bmg_id
     ])
 
-    # Group original IDs per BMG ID
     grouped_mapping_df = (
         mapping_df.groupby("BioMedGraphica_Conn_ID")["Original_ID"]
         .apply(lambda x: ";".join(sorted(set(str(i) for i in x if pd.notna(i) and str(i).strip()))))
         .reset_index()
     )
 
-    # Ensure full list of BMG IDs included
     final_mapping_df = pd.DataFrame({"BioMedGraphica_Conn_ID": bmg_ids}).merge(
         grouped_mapping_df, on="BioMedGraphica_Conn_ID", how="left"
     ).fillna({"Original_ID": ""})
@@ -90,7 +108,6 @@ def apply_soft_match_selection(
         index=False
     )
 
-    # === If nothing selected: fill zero matrix ===
     if mapping_df.empty:
         data_matrix = pd.DataFrame(0, index=sample_ids, columns=bmg_ids)
         np.save(os.path.join(output_dir, "_x", f"{feature_label.lower()}.npy"), data_matrix.values)
@@ -101,7 +118,6 @@ def apply_soft_match_selection(
             "message": "No mappings selected"
         }
 
-    # === Generate value matrix ===
     melted["Original_ID"] = melted["Original_ID"].astype(str)
     mapping_df["Original_ID"] = mapping_df["Original_ID"].astype(str)
 

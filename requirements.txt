@@ -10,3 +10,4 @@ transformers
 scikit-learn
 pyvis
 python-dotenv
+faiss-cpu
