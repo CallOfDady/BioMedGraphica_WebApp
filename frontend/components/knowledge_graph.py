@@ -115,7 +115,9 @@ def render_knowledge_graph(job_manager):
     var options = {
       "nodes": {
         "shape": "ellipse",
-        "font": {"size": 18},
+        "font": {"size": 18,
+                 "color": "black",
+                 "strokeWidth": 0},
         "shadow": false
       },
       "edges": {
