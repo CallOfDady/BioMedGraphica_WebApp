@@ -34,7 +34,12 @@ def process_entity_hard_match(entity_type, id_type, file_path, feature_label, da
             feature_label
         )
 
-        return {"feature_label": feature_label, "status": "success"}
+        return {
+            "feature_label": feature_label,
+            "status": "success",
+            "input_feature_count": 0,
+            "mapped_count": len(bmg_ids),
+        }
 
     sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
     df = pd.read_csv(file_path, sep=sep)
@@ -50,6 +55,7 @@ def process_entity_hard_match(entity_type, id_type, file_path, feature_label, da
     mapping_expanded["Original_ID"] = mapping_expanded["Original_ID"].str.strip()
     mapping_df = mapping_expanded[mapping_expanded["Original_ID"].isin(used_ids)]
     mapping_df = mapping_df[["Original_ID", "BioMedGraphica_Conn_ID"]].drop_duplicates()
+    mapped_original_id_count = mapping_df["Original_ID"].nunique()
 
     print(f"[DEBUG] mapping_df rows: {len(mapping_df)}")
 
@@ -94,4 +100,9 @@ def process_entity_hard_match(entity_type, id_type, file_path, feature_label, da
         feature_label
     )
 
-    return {"feature_label": feature_label, "status": "success"}
+    return {
+        "feature_label": feature_label,
+        "status": "success",
+        "input_feature_count": len(used_ids),
+        "mapped_count": mapped_original_id_count,
+    }
