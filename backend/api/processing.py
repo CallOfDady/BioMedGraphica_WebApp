@@ -36,6 +36,7 @@ class MappingItem(BaseModel):
 class FeatureMapping(BaseModel):
     entity_type: str
     feature_label: str
+    total_original_ids: Optional[int] = None
     mappings: List[MappingItem]
 
 class MappingSubmission(BaseModel):

@@ -17,6 +17,35 @@ from backend.config import Config
 
 r = redis.Redis()
 
+def _collect_entity_input_stats(entities_cfgs):
+    entity_stats = []
+
+    for cfg in entities_cfgs:
+        feature_label = cfg.get("feature_label")
+        entity_type = cfg.get("entity_type", "")
+        fill0 = cfg.get("fill0", False)
+        file_path = cfg.get("file_path", "")
+
+        stat_item = {
+            "feature_label": feature_label,
+            "entity_type": entity_type.capitalize() if entity_type else "",
+            "fill0": fill0,
+            "input_feature_count": 0,
+        }
+
+        if fill0:
+            stat_item["input_source"] = "virtual"
+            entity_stats.append(stat_item)
+            continue
+
+        sep = "\t" if file_path.endswith((".tsv", ".txt")) else ","
+        df = pd.read_csv(file_path, sep=sep, nrows=0)
+        stat_item["input_source"] = "file"
+        stat_item["input_feature_count"] = max(len(df.columns) - 1, 0)
+        entity_stats.append(stat_item)
+
+    return entity_stats
+
 @celery_app.task
 def compute_common_id_task(entities_cfgs, job_id):
     print(f"[compute_common] job: {job_id}")
@@ -34,9 +63,14 @@ def compute_common_id_task(entities_cfgs, job_id):
     common_ids = sorted(list(set.intersection(*sample_sets)))
 
     r.set(f"common_ids:{job_id}", json.dumps(common_ids))
+    entity_input_stats = _collect_entity_input_stats(entities_cfgs)
+    r.set(f"entity_input_stats:{job_id}", json.dumps(entity_input_stats))
 
     print(f"Common sample IDs for job `{job_id}`: {len(common_ids)} found")
-    return common_ids
+    return {
+        "common_ids": common_ids,
+        "entity_input_stats": entity_input_stats,
+    }
 
 @celery_app.task
 def run_label_task(label_cfg, output_dir, job_id, common_ids=None):
@@ -114,7 +148,11 @@ def run_hard_match_task(ent_cfg, output_dir, job_id, common_ids):
         return {
             "job_id": job_id,
             "feature_label": ent_cfg["feature_label"],
-            "status": result["status"]
+            "entity_type": ent_cfg["entity_type"].capitalize(),
+            "status": result["status"],
+            "input_feature_count": result.get("input_feature_count", 0),
+            "mapped_count": result.get("mapped_count", 0),
+            "fill0": ent_cfg.get("fill0", False),
         }
 
     except Exception as e:
@@ -122,7 +160,9 @@ def run_hard_match_task(ent_cfg, output_dir, job_id, common_ids):
         return {
             "job_id": job_id,
             "feature_label": ent_cfg["feature_label"],
+            "entity_type": ent_cfg["entity_type"].capitalize(),
             "status": "error",
+            "fill0": ent_cfg.get("fill0", False),
             "error": str(e)
         }
 
@@ -194,7 +234,12 @@ def run_soft_match_apply(ent_cfg, output_dir, job_id, confirmed_mapping, common_
     )
 
     print(f"[run_soft:apply] Finished for {feature_label} → Status: {result.get('status')}")
-    return result
+    return {
+        **result,
+        "entity_type": ent_cfg["entity_type"].capitalize(),
+        "fill0": ent_cfg.get("fill0", False),
+        "input_feature_count": confirmed_mapping.get("total_original_ids", result.get("input_feature_count", 0)),
+    }
 
 @celery_app.task
 def finalize_task(results, finalize_cfg, output_dir, job_id, task_id):
@@ -205,16 +250,34 @@ def finalize_task(results, finalize_cfg, output_dir, job_id, task_id):
         file_order = finalize_cfg.get("file_order", [])
         apply_zscore = finalize_cfg.get("apply_zscore", False)
         edge_types = finalize_cfg.get("edge_types", None)
+        entity_input_stats = finalize_cfg.get("entity_input_stats", [])
 
         if not file_order:
             raise ValueError("file_order is required for finalization")
+
+        result_stats_by_label = {}
+        for item in results or []:
+            feature_label = item.get("feature_label")
+            if feature_label:
+                result_stats_by_label[feature_label] = item
+
+        merged_entity_stats = []
+        for item in entity_input_stats:
+            feature_label = item.get("feature_label")
+            result_item = result_stats_by_label.get(feature_label, {})
+            merged_entity_stats.append({
+                **item,
+                "mapped_count": int(result_item.get("mapped_count", 0) or 0),
+                "status": result_item.get("status", "unknown"),
+            })
 
         result = finalize(
             database_path=Config.DATABASE_PATH,
             cache_dir=output_dir,
             file_order=file_order,
             edge_types=edge_types,
-            apply_zscore=apply_zscore
+            apply_zscore=apply_zscore,
+            entity_stats=merged_entity_stats
         )
 
         print(f"Finalization complete for job {job_id}")
@@ -277,7 +340,7 @@ def finalize_task(results, finalize_cfg, output_dir, job_id, task_id):
         }
     
 @celery_app.task
-def launch_processing_chord(common_ids, config):
+def launch_processing_chord(common_payload, config):
     """
     Creates and executes a chord with parallel tasks.
     This task doesn't wait for results, just creates the chord.
@@ -288,6 +351,8 @@ def launch_processing_chord(common_ids, config):
     task_id = config["task_id"]
     output_dir = config["output_dir"]
     finalize_cfg = config["finalize"]
+    common_ids = common_payload["common_ids"]
+    finalize_cfg["entity_input_stats"] = common_payload.get("entity_input_stats", [])
 
     mappings = load_mappings_from_redis(job_id)
 

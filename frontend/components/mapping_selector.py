@@ -110,6 +110,7 @@ def render_mapping_selector(candidate_data: List[Dict[str, Any]]) -> Optional[Li
             structured_mappings.append({
                 "entity_type": entity_type,
                 "feature_label": feature_label,
+                "total_original_ids": total_original_ids,
                 "mappings": feature_mappings
             })
 

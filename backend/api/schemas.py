@@ -26,3 +26,4 @@ class FinalConfig(BaseModel):
     file_order: Optional[List[str]]
     apply_zscore: bool = False
     edge_types: Optional[List[str]]
+    entity_input_stats: Optional[List[dict]] = None

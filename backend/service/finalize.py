@@ -124,6 +124,12 @@ def process_edge_data_with_selected_types(filtered_edge_data, selected_types, en
 
     # Save the filtered edge data with BioMedGraphica_Conn_ID
     filtered_edge_data.to_csv(os.path.join(processed_data_path, 'filtered_edge_id_index_data.csv'), index=False)
+    edge_type_counts = (
+        filtered_edge_data["Type"].value_counts().sort_index().to_dict()
+        if not filtered_edge_data.empty
+        else {}
+    )
+    return edge_type_counts, int(len(filtered_edge_data))
 
 def generate_name_and_desc_csvs(cache_dir, file_order, out_dir):
     """Generate concatenated name and description CSVs from individual files."""
@@ -175,7 +181,7 @@ def generate_name_and_desc_csvs(cache_dir, file_order, out_dir):
 
 
 
-def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore=False):
+def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore=False, entity_stats=None):
 
     mapping_df, merged_data, out_dir = merge_data_and_generate_entity_mapping(
         cache_dir, file_order, apply_zscore
@@ -190,7 +196,7 @@ def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore
     else:
         selected = [t for t in edge_types if t in unique_types]
 
-    process_edge_data_with_selected_types(
+    edge_type_counts, total_selected_edges = process_edge_data_with_selected_types(
         filtered_edge_data,
         selected,
         mapping_df,
@@ -199,9 +205,24 @@ def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore
 
     generate_name_and_desc_csvs(cache_dir, file_order, out_dir)
 
+    entity_stats = entity_stats or []
+    total_input_features = sum(int(item.get("input_feature_count", 0) or 0) for item in entity_stats)
+    total_mapped_features = sum(int(item.get("mapped_count", 0) or 0) for item in entity_stats)
+
+    stats = {
+        "sample_count": int(merged_data.shape[0]),
+        "entity_count": int(len(entity_stats)),
+        "total_input_features": total_input_features,
+        "total_mapped_features": total_mapped_features,
+        "total_selected_edges": total_selected_edges,
+        "entity_stats": entity_stats,
+        "edge_type_counts": edge_type_counts,
+    }
+
     return {
         "status": "success",
         "processed_data_path": out_dir,
         "selected_edge_types": selected,
         "available_edge_types": unique_types,
+        "stats": stats,
     }

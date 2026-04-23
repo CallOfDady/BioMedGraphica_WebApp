@@ -23,6 +23,7 @@ from frontend.components.knowledge_graph import render_knowledge_graph, analyze_
 from frontend.components.entity_order import render_entity_order
 
 from frontend.components.mapping_selector import render_mapping_selector
+from frontend.components.processing_summary import render_processing_summary
 
 from frontend.api.client import submit_async_processing_task, submit_mappings_to_backend, check_task_status, download_results
 
@@ -477,7 +478,7 @@ def build_app():
                                 box-sizing: border-box;
                             ">📥 Download Result</a>
                             """, unsafe_allow_html=True)
-                        del st.session_state.submitted_task_id
+                        render_processing_summary(status)
 
                     elif status.get("status") == "FAILURE":
                         st.error("❌ Task failed. Please check logs or retry.")
