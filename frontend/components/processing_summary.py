@@ -29,6 +29,7 @@ def _build_summary_df(stats, entity_stats):
         {"Metric": "Total samples", "Value": stats.get("sample_count", 0)},
         {"Metric": "Selected edges", "Value": stats.get("total_selected_edges", 0)},
         {"Metric": "Entity Types", "Value": stats.get("entity_count", len(entity_stats))},
+        {"Metric": "Total BMG Records", "Value": f"{int(stats.get('total_database_entities', 0)):,}"},
     ])
 
 
@@ -44,7 +45,7 @@ def _build_entity_table_df(entity_stats):
             "Entity Label": item.get("feature_label", ""),
             "Entity Type": item.get("entity_type", ""),
             "Source": source,
-            "Recall": "N/A" if recall is None else f"{recall:.2f}%",
+            "BMG Records": f"{int(item.get('database_total_count', 0) or 0):,}",
         })
 
     return pd.DataFrame(rows)
