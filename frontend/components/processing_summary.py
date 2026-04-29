@@ -3,10 +3,14 @@ import pandas as pd
 import streamlit as st
 
 
-LEFT_PANEL_HEIGHT = 720
-RIGHT_PANEL_HEIGHT = 720
-RIGHT_SECTION_HEIGHT = 350
+LEFT_PANEL_HEIGHT = 620
+RIGHT_PANEL_HEIGHT = 620
+TOP_SECTION_HEIGHT = 240
+BOTTOM_SECTION_HEIGHT = 360
 ROW_HEIGHT = 36
+BAR_SIZE = 18
+MIN_ENTITY_CHART_HEIGHT = 160
+MIN_EDGE_CHART_HEIGHT = 180
 
 
 def _safe_recall(mapped_count, input_feature_count):
@@ -55,7 +59,10 @@ def _build_entity_chart_df(entity_stats):
     rows = []
     for item in entity_stats:
         source = item.get("input_source", "file")
-        recall = None if source == "virtual" else _safe_recall(
+        if source == "virtual":
+            continue
+
+        recall = _safe_recall(
             item.get("mapped_count", 0),
             item.get("input_feature_count", 0),
         )
@@ -67,17 +74,13 @@ def _build_entity_chart_df(entity_stats):
             "Mapped": int(item.get("mapped_count", 0) or 0),
             "Recall Value": 0 if recall is None else recall,
             "Recall": "N/A" if recall is None else f"{recall:.2f}%",
-            "Is Virtual": source == "virtual",
         })
 
     chart_df = pd.DataFrame(rows)
     if chart_df.empty:
         return chart_df
 
-    return chart_df.sort_values(
-        by=["Is Virtual", "Recall Value", "Entity Label"],
-        ascending=[True, False, True],
-    )
+    return chart_df.sort_values(by=["Recall Value", "Entity Label"], ascending=[False, True])
 
 
 def _build_edge_table_df(edge_type_counts):
@@ -127,7 +130,7 @@ def _build_entity_recall_chart(entity_chart_df):
         st.info("No entity recall data available.")
         return
 
-    chart_height = max(260, len(entity_chart_df) * ROW_HEIGHT)
+    chart_height = max(MIN_ENTITY_CHART_HEIGHT, len(entity_chart_df) * ROW_HEIGHT)
     base = alt.Chart(entity_chart_df).encode(
         y=alt.Y(
             "Entity Label:N",
@@ -136,13 +139,9 @@ def _build_entity_recall_chart(entity_chart_df):
         )
     )
 
-    bars = base.mark_bar().encode(
+    bars = base.mark_bar(size=BAR_SIZE).encode(
         x=alt.X("Recall Value:Q", title="Recall (%)", scale=alt.Scale(domain=[0, 100])),
-        color=alt.condition(
-            alt.datum["Is Virtual"],
-            alt.value("#c7c7c7"),
-            alt.value("#4c956c"),
-        ),
+        color=alt.value("#4c956c"),
         tooltip=[
             alt.Tooltip("Entity Label:N"),
             alt.Tooltip("Entity Type:N"),
@@ -177,7 +176,7 @@ def _build_edge_count_chart(edge_df):
         st.info("No edge count data available.")
         return
 
-    chart_height = max(260, len(edge_df) * ROW_HEIGHT)
+    chart_height = max(MIN_EDGE_CHART_HEIGHT, len(edge_df) * ROW_HEIGHT)
     log_tick_values = _build_log_tick_values(int(edge_df["Count Plot"].max()))
     base = alt.Chart(edge_df).encode(
         y=alt.Y(
@@ -187,7 +186,7 @@ def _build_edge_count_chart(edge_df):
         )
     )
 
-    bars = base.mark_bar(color="#3d5a80").encode(
+    bars = base.mark_bar(color="#3d5a80", size=BAR_SIZE).encode(
         x=alt.X(
             "Count Plot:Q",
             title="Count (log scale)",
@@ -235,18 +234,18 @@ def render_processing_summary(status):
 
     with left_col:
         with st.container(border=True, height=LEFT_PANEL_HEIGHT):
-            st.markdown("#### Processing Summary")
+            st.markdown("#### Overall Summary")
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-            st.markdown("#### Entity Matching Breakdown")
+            st.markdown("#### Entity Summary")
             st.dataframe(entity_df, use_container_width=True, hide_index=True)
 
     with right_col:
         with st.container(border=True, height=RIGHT_PANEL_HEIGHT):
-            with st.container(height=RIGHT_SECTION_HEIGHT):
-                st.markdown("#### Entity Matching Recall")
+            with st.container(height=TOP_SECTION_HEIGHT):
+                st.markdown("#### Entity Matching")
                 _build_entity_recall_chart(entity_chart_df)
 
-            with st.container(height=RIGHT_SECTION_HEIGHT):
+            with st.container(height=BOTTOM_SECTION_HEIGHT):
                 st.markdown("#### Edge Type Count")
                 _build_edge_count_chart(edge_df)
