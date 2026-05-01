@@ -4,6 +4,35 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
+
+def _get_entity_database_total_count(cache_dir, feature_label):
+    mapping_file_path = os.path.join(
+        cache_dir,
+        "raw_id_mapping",
+        f"{feature_label}_id_map.csv",
+    )
+    if not os.path.exists(mapping_file_path):
+        return 0
+
+    mapping_df = pd.read_csv(mapping_file_path)
+    if "BioMedGraphica_Conn_ID" not in mapping_df.columns:
+        return 0
+
+    return int(mapping_df["BioMedGraphica_Conn_ID"].nunique())
+
+
+def _augment_entity_stats_with_database_totals(cache_dir, entity_stats):
+    enriched_entity_stats = []
+
+    for item in entity_stats:
+        feature_label = item.get("feature_label", "")
+        enriched_entity_stats.append({
+            **item,
+            "database_total_count": _get_entity_database_total_count(cache_dir, feature_label),
+        })
+
+    return enriched_entity_stats
+
 def merge_data_and_generate_entity_mapping(cache_folder, file_order, apply_zscore=False):
     processed_data_path = os.path.join(cache_folder, 'processed_data/')
     os.makedirs(processed_data_path, exist_ok=True)
@@ -205,13 +234,15 @@ def finalize(database_path, cache_dir, file_order, edge_types=None, apply_zscore
 
     generate_name_and_desc_csvs(cache_dir, file_order, out_dir)
 
-    entity_stats = entity_stats or []
+    entity_stats = _augment_entity_stats_with_database_totals(cache_dir, entity_stats or [])
     total_input_features = sum(int(item.get("input_feature_count", 0) or 0) for item in entity_stats)
     total_mapped_features = sum(int(item.get("mapped_count", 0) or 0) for item in entity_stats)
+    total_database_entities = sum(int(item.get("database_total_count", 0) or 0) for item in entity_stats)
 
     stats = {
         "sample_count": int(merged_data.shape[0]),
         "entity_count": int(len(entity_stats)),
+        "total_database_entities": total_database_entities,
         "total_input_features": total_input_features,
         "total_mapped_features": total_mapped_features,
         "total_selected_edges": total_selected_edges,
